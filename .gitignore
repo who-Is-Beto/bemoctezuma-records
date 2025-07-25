@@ -1,0 +1,21 @@
+ecommerceEnv
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+ecommerceEnv/
+
+# SQLite database (optional, if it's just for local dev)
+db.sqlite3
+
+# VSCode or other IDE settings (optional)
+.vscode/
+.idea/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Python virtualenv metadata
+*.egg-info/
