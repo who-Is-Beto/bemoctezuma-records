@@ -22,7 +22,7 @@ def record_detail(_, slug):
     return Response(serializer.data)
 
 @api_view(['GET'])
-def get_category_list ():
+def get_category_list(_):
     categories = Category.objects.all()
     serializer = CategoryListSerializer(categories, many=True)
     return Response(serializer.data)
