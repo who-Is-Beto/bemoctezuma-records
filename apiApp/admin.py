@@ -1,9 +1,6 @@
 from django.contrib.auth.admin import UserAdmin
 from django.contrib import admin
-from .models import User, Category, Record, Artist, Genere
-
-
-
+from .models import User, Category, Record, Artist, Genere, Cart, CartItem
 
 class CustomUserAdmin(UserAdmin):
     list_display = ('username', 'email', 'first_name', 'last_name')
@@ -26,9 +23,8 @@ admin.site.register(Record, RecordAdmin)
 class CategoryAdmin(admin.ModelAdmin):
     list_display = ('name', 'description', 'slug')
     prepopulated_fields = {'slug': ('name',)}
-
 admin.site.register(Category, CategoryAdmin)
 
-
+admin.site.register([Cart, CartItem])
 
 # Register your models here.
