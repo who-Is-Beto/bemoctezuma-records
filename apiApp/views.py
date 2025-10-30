@@ -1,6 +1,7 @@
+from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view
-from .models import Record, Category, Cart, CartItem
-from .serilizers import RecordDetailSerializer, RecordListSerializer, CategorySerializer, CategoryListSerializer, CartSerializer, CartItemSerializer
+from .models import Record, Category, Cart, CartItem, Wishlist, WishlistItem
+from .serilizers import RecordDetailSerializer, RecordListSerializer, CategorySerializer, CategoryListSerializer, CartSerializer, CartItemSerializer, WishlistSerializer
 from rest_framework.response import Response
 
 # Create your views here.
@@ -116,3 +117,70 @@ def remove_all_cart_items(request):
     except Cart.DoesNotExist:
         return Response({"error": "Cart not found"}, status=404)
     
+
+
+@api_view(['POST'])
+def add_to_wishlist(request):
+    wishlist_code = request.data.get('wishlist_code')
+    record_id = request.data.get('record_id')
+
+    if not record_id:
+        return Response({"error": "record_id is required"}, status=400)
+
+    record = get_object_or_404(Record, id=str(record_id))
+
+    if wishlist_code:
+        wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
+        created = False
+    else:
+        wishlist = Wishlist.objects.create()
+        created = True
+
+    wish_item, _ = WishlistItem.objects.get_or_create(record=record, wishlist=wishlist)
+
+    wishlist.refresh_from_db()
+
+    serializer = WishlistSerializer(wishlist)
+    status_code = 201 if created else 200
+    return Response(serializer.data, status=status_code)
+
+@api_view(['GET'])
+def get_all_wishlists(_):
+    wishlists = Wishlist.objects.all()
+    serializer = WishlistSerializer(wishlists, many=True)
+    return Response(serializer.data)
+
+@api_view(['GET'])
+def get_wishlist(_, wishlist_code):
+    wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
+    serializer = WishlistSerializer(wishlist)
+    return Response(serializer.data)
+
+@api_view(['DELETE'])
+def remove_from_wishlist(request):
+    wishlist_code = request.data.get('wishlist_code')
+    record_id = request.data.get('record_id')
+
+    if not wishlist_code or not record_id:
+        return Response({"error": "wishlist_code and record_id are required"}, status=400)
+
+    wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
+    try:
+        wishlist_item = WishlistItem.objects.get(wishlist=wishlist, record_id=record_id)
+    except WishlistItem.DoesNotExist:
+        return Response({"error": "Wishlist item not found"}, status=404)
+
+    wishlist_item.delete()
+    wishlist.refresh_from_db()
+    serializer = WishlistSerializer(wishlist)
+    return Response({"message": "Record removed from wishlist", "wishlist": serializer.data}, status=200)
+
+@api_view(['GET'])
+def get_wishlist_count(request):
+    wishlist_code = request.query_params.get('wishlist_code') or request.data.get('wishlist_code')
+    if not wishlist_code:
+        return Response({"error": "wishlist_code is required"}, status=400)
+
+    wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
+    wishlist_count = wishlist.wishlist_items.count()
+    return Response({"wishlist_count": wishlist_count}, status=200)
