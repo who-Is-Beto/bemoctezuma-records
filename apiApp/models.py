@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from django.utils.text import slugify
 from django.contrib.auth.models import AbstractUser
@@ -117,3 +119,22 @@ class CartItem(models.Model):
 
     def __str__(self):
         return f"{self.quantity} x {self.record.title} in cart {self.cart.cart_code}"
+
+class Wishlist(models.Model):
+    wishlist_code = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Wishlist {self.wishlist_code}"
+    
+class WishlistItem(models.Model):
+    wishlist = models.ForeignKey(Wishlist, on_delete=models.CASCADE, related_name='wishlist_items')
+    record = models.ForeignKey(Record, on_delete=models.CASCADE, related_name='wishlist_records')
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('wishlist', 'record')
+
+    def __str__(self):
+        return f"{self.record.title} in wishlist {self.wishlist.wishlist_code}"

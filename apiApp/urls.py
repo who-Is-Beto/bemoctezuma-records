@@ -10,7 +10,12 @@ from .views import (
     get_cart,
     get_all_carts,
     get_all_cart_items,
-    remove_all_cart_items
+    remove_all_cart_items,
+    add_to_wishlist,
+    get_all_wishlists,
+    get_wishlist,
+    remove_from_wishlist,
+    get_wishlist_count,
 )
 
 urlpatterns = [
@@ -25,4 +30,9 @@ urlpatterns = [
     path('cart/remove/', remove_cart_item, name='remove-cart-item'),
     path('cart/remove-all/', remove_all_cart_items, name='remove-all-cart-items'),
     path('cart/<str:cart_code>/', get_cart, name='get-cart'),
+    path('wishlists/add/', add_to_wishlist, name='add-to-wishlist'),
+    path('wishlists/', get_all_wishlists, name='get-all-wishlists'),
+    path('wishlists/<uuid:wishlist_code>/', get_wishlist, name='get-wishlist'),
+    path('wishlists/remove/', remove_from_wishlist, name='remove-from-wishlist'),
+    path('wishlists/count/', get_wishlist_count, name='get-wishlist-count'),
 ]

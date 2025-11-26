@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Record, Category, User, CartItem, Cart
+from .models import Record, Category, User, CartItem, Cart, Wishlist, WishlistItem
 
 class RecordDetailSerializer(serializers.ModelSerializer):
     class Meta:
@@ -69,3 +69,18 @@ class CartStatSerializer(serializers.ModelSerializer):
     def get_total_quantity(self, cart):
         total_quantity = sum(item.quantity for item in cart.cart_items.all())
         return total_quantity
+
+class WishlistItemSerializer(serializers.ModelSerializer):
+    record = RecordListSerializer(read_only=True)
+
+    class Meta:
+        model = WishlistItem
+        fields = ['id', 'record', 'added_at']
+
+
+class WishlistSerializer(serializers.ModelSerializer):
+    wishlist_items = WishlistItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Wishlist
+        fields = ['id', 'wishlist_code', 'created_at', 'updated_at', 'wishlist_items']
