@@ -30,9 +30,9 @@ urlpatterns = [
     path('cart/remove/', remove_cart_item, name='remove-cart-item'),
     path('cart/remove-all/', remove_all_cart_items, name='remove-all-cart-items'),
     path('cart/<str:cart_code>/', get_cart, name='get-cart'),
-    path('wishlist/add/', add_to_wishlist, name='add-to-wishlist'),
+    path('wishlists/add/', add_to_wishlist, name='add-to-wishlist'),
     path('wishlists/', get_all_wishlists, name='get-all-wishlists'),
-    path('wishlist/<uuid:wishlist_code>/', get_wishlist, name='get-wishlist'),
-    path('wishlist/remove/', remove_from_wishlist, name='remove-from-wishlist'),
-    path('wishlist/count/', get_wishlist_count, name='get-wishlist-count'),
+    path('wishlists/<uuid:wishlist_code>/', get_wishlist, name='get-wishlist'),
+    path('wishlists/remove/', remove_from_wishlist, name='remove-from-wishlist'),
+    path('wishlists/count/', get_wishlist_count, name='get-wishlist-count'),
 ]
