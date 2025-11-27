@@ -4,12 +4,13 @@ from django.db import models
 from django.utils.text import slugify
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
-
-# Create your models here.
+from django.conf import settings
 
 class User(AbstractUser):
-    # profile_picture = models.ImageField(upload_to='profile_pictures/', blank=True, null=True)
+    profile_picture = models.URLField(blank=True, null=True)
     username = models.CharField(max_length=150, unique=True)
+    first_name = models.CharField(max_length=150, blank=True, null=True)
+    last_name = models.CharField(max_length=150, blank=True, null=True)
     email = models.EmailField(unique=True)
     profile_picture_url = models.ImageField(blank=True, null=True)
 
@@ -138,3 +139,25 @@ class WishlistItem(models.Model):
 
     def __str__(self):
         return f"{self.record.title} in wishlist {self.wishlist.wishlist_code}"
+
+class Review(models.Model):
+
+    RATING_CHOICES = [
+        (1, "Pa' la basura"),
+        (2, '2 - Mas o menos'),
+        (3, '3 - Promedio'),
+        (4, "4 - Ta' bueno"),
+        (5, '5 - Maravilloso'),
+    ]
+
+    record = models.ForeignKey(Record, on_delete=models.CASCADE, related_name='reviews')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews')
+    rating = models.PositiveIntegerField(choices=RATING_CHOICES)
+    review = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    def __str__(self):
+        return f"Review of {self.record.title} by {self.user.username}"
+    class Meta:
+        unique_together = ('record', 'user')
+        ordering = ['-created_at']

@@ -16,6 +16,7 @@ from .views import (
     get_wishlist,
     remove_from_wishlist,
     get_wishlist_count,
+    add_review,
 )
 
 urlpatterns = [
@@ -35,4 +36,5 @@ urlpatterns = [
     path('wishlists/<uuid:wishlist_code>/', get_wishlist, name='get-wishlist'),
     path('wishlists/remove/', remove_from_wishlist, name='remove-from-wishlist'),
     path('wishlists/count/', get_wishlist_count, name='get-wishlist-count'),
+    path('reviews/add/', add_review, name='add-review'),
 ]

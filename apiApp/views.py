@@ -1,10 +1,11 @@
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view
-from .models import Record, Category, Cart, CartItem, Wishlist, WishlistItem
-from .serilizers import RecordDetailSerializer, RecordListSerializer, CategorySerializer, CategoryListSerializer, CartSerializer, CartItemSerializer, WishlistSerializer
+from .models import Record, Category, Cart, CartItem, Wishlist, WishlistItem, Review
+from .serilizers import RecordDetailSerializer, RecordListSerializer, CategorySerializer, CategoryListSerializer, CartSerializer, CartItemSerializer, WishlistSerializer, ReviewSerializer
 from rest_framework.response import Response
+from django.contrib.auth import get_user_model
 
-# Create your views here.
+User = get_user_model()
 
 @api_view(['GET'])
 def record_list(_):
@@ -184,3 +185,22 @@ def get_wishlist_count(request):
     wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
     wishlist_count = wishlist.wishlist_items.count()
     return Response({"wishlist_count": wishlist_count}, status=200)
+
+@api_view(['POST'])
+def add_review(request):
+    record_id = request.data.get('record_id')
+    email = request.data.get('email')
+    rating = request.data.get('rating')
+    review = request.data.get('review')
+
+    record = Record.objects.get(id=str(record_id))
+    user = User.objects.get(email=email)
+
+    new_review = Review.objects.create(
+        record=record,
+        user=user,
+        rating=rating,
+        review=review
+    )
+    serialized_review = ReviewSerializer(new_review)
+    return Response({"message": "Review added successfully", "review": serialized_review.data}, status=201)
