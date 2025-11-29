@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from .models import Record, Category, User, CartItem, Cart, Wishlist, WishlistItem
-
+from .models import Record, Category, CartItem, Cart, Wishlist, WishlistItem, Review
+from django.contrib.auth import get_user_model
 class RecordDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Record
@@ -30,14 +30,10 @@ class CategoryListSerializer(serializers.ModelSerializer):
         model = Category
         fields = ["id", "name", "slug"]
 
-class UserSerializer(serializers.ModelSerializer):
+class  UserSerializer(serializers.ModelSerializer):
     class Meta:
-        model = User
-        fields = ['id', 'username', 'email', 'profile_picture_url']
-        extra_kwargs = {
-            'password': {'write_only': True},
-            'profile_picture_url': {'required': False},
-        }
+        model = get_user_model()
+        fields = ['id', 'username', 'email', 'first_name', 'last_name']
 
 class CartItemSerializer(serializers.ModelSerializer):
     record = RecordListSerializer(read_only=True)
@@ -84,3 +80,9 @@ class WishlistSerializer(serializers.ModelSerializer):
     class Meta:
         model = Wishlist
         fields = ['id', 'wishlist_code', 'created_at', 'updated_at', 'wishlist_items']
+
+class ReviewSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    class Meta:
+        model = Review
+        fields = ['id', 'user', 'rating', 'review', 'created_at', 'updated_at']
