@@ -193,6 +193,15 @@ def add_review(request):
     rating = request.data.get('rating')
     review = request.data.get('review')
 
+    if(not record_id or not email or not rating or not review):
+        return Response({"error": "record_id, email, rating, and review are required"}, status=400)
+    
+    if(int(rating) < 1 or int(rating) > 5):
+        return Response({"error": "rating must be between 1 and 5"}, status=400)
+
+    if Review.objects.filter(record_id=record_id, email=email).exists():
+        return Response({"error": "User has already reviewed this record"}, status=400)
+
     record = Record.objects.get(id=str(record_id))
     user = User.objects.get(email=email)
 
@@ -204,3 +213,61 @@ def add_review(request):
     )
     serialized_review = ReviewSerializer(new_review)
     return Response({"message": "Review added successfully", "review": serialized_review.data}, status=201)
+
+@api_view(['PUT'])
+def update_review(request):
+    review_id = request.data.get('review_id')
+    rating = request.data.get('rating')
+    review_text = request.data.get('review')
+
+    if not review_id:
+        return Response({"error": "review_id is required"}, status=400)
+
+    try:
+        review = Review.objects.get(id=review_id)
+    except Review.DoesNotExist:
+        return Response({"error": "Review not found"}, status=404)
+
+    if rating:
+        if int(rating) < 1 or int(rating) > 5:
+            return Response({"error": "rating must be between 1 and 5"}, status=400)
+        review.rating = rating
+
+    if review_text:
+        review.review = review_text
+
+    review.save()
+    serialized_review = ReviewSerializer(review)
+    return Response({"message": "Review updated successfully", "review": serialized_review.data}, status=200)
+
+@api_view(['DELETE'])
+def delete_review(request):
+    review_id = request.data.get('review_id')
+
+    if not review_id:
+        return Response({"error": "review_id is required"}, status=400)
+
+    try:
+        review = Review.objects.get(id=review_id)
+    except Review.DoesNotExist:
+        return Response({"error": "Review not found"}, status=404)
+
+    review.delete()
+    return Response({"message": "Review deleted successfully"}, status=200)
+
+@api_view(['GET'])
+def get_record_reviews(_, record_id):
+    try:
+        record = Record.objects.get(id=record_id)
+    except Record.DoesNotExist:
+        return Response({"error": "Record not found"}, status=404)
+
+    reviews = Review.objects.filter(record=record)
+    serializer = ReviewSerializer(reviews, many=True)
+    return Response(serializer.data)
+
+@api_view(['GET'])
+def get_all_reviews(_):
+    reviews = Review.objects.all()
+    serializer = ReviewSerializer(reviews, many=True)
+    return Response(serializer.data)
