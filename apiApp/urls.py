@@ -22,5 +22,4 @@ urlpatterns = [
     path('reviews/update/', views.update_review, name='update-review'),
     path('reviews/delete/', views.delete_review, name='delete-review'),
     path('reviews/', views.get_all_reviews, name='get-all-reviews'),
-    path('reviews/<>', views.get_all_reviews, name='get-all-reviews'),
 ]
