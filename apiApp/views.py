@@ -122,28 +122,24 @@ def remove_all_cart_items(request):
 
 @api_view(['POST'])
 def add_to_wishlist(request):
+    email = request.data.get('email')
     wishlist_code = request.data.get('wishlist_code')
     record_id = request.data.get('record_id')
-
+    user = User.objects.get(email=email) if email else None
+    
     if not record_id:
         return Response({"error": "record_id is required"}, status=400)
 
-    record = get_object_or_404(Record, id=str(record_id))
-
     if wishlist_code:
-        wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
-        created = False
+        wishlist, _ = Wishlist.objects.get_or_create(wishlist_code=wishlist_code, defaults={'user': user})
     else:
-        wishlist = Wishlist.objects.create()
-        created = True
-
-    wish_item, _ = WishlistItem.objects.get_or_create(record=record, wishlist=wishlist)
-
-    wishlist.refresh_from_db()
-
+        wishlist = Wishlist.objects.create(user=user)
+    record = Record.objects.get(id=str(record_id))
+    _, created = WishlistItem.objects.get_or_create(wishlist=wishlist, record=record)
+    if not created:
+        return Response({"message": "Record already in wishlist"}, status=200)
     serializer = WishlistSerializer(wishlist)
-    status_code = 201 if created else 200
-    return Response(serializer.data, status=status_code)
+    return Response({"message": "Record added to wishlist", "wishlist": serializer.data}, status=201)
 
 @api_view(['GET'])
 def get_all_wishlists(_):
@@ -152,7 +148,9 @@ def get_all_wishlists(_):
     return Response(serializer.data)
 
 @api_view(['GET'])
-def get_wishlist(_, wishlist_code):
+def get_wishlist(request, wishlist_code):
+    email = request.query_params.get('email')
+    user = User.objects.get(email=email) if email else None
     wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
     serializer = WishlistSerializer(wishlist)
     return Response(serializer.data)
