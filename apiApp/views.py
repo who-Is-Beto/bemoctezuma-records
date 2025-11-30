@@ -1,5 +1,6 @@
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view
+from django.db.models import Q
 from .models import Record, Category, Cart, CartItem, Wishlist, WishlistItem, Review
 from .serilizers import RecordDetailSerializer, RecordListSerializer, CategorySerializer, CategoryListSerializer, CartSerializer, CartItemSerializer, WishlistSerializer, ReviewSerializer
 from rest_framework.response import Response
@@ -268,4 +269,21 @@ def get_record_reviews(_, record_id):
 def get_all_reviews(_):
     reviews = Review.objects.all()
     serializer = ReviewSerializer(reviews, many=True)
+    return Response(serializer.data)
+
+@api_view(['GET'])
+def record_search(request):
+    query = request.query_params.get('query')
+    if not query:
+        return Response({"error": "query parameter is required"}, status=400)
+    
+    records = Record.objects.filter(Q(title__icontains=query) |
+                                    Q(artist__name__icontains=query) |
+                                    Q(genere__name__icontains=query) | 
+                                    Q(category__name__icontains=query))
+    
+    
+    if not records.exists():
+        return Response({"message": "No records found matching the query"}, status=404)
+    serializer = RecordListSerializer(records, many=True)
     return Response(serializer.data)
