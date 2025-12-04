@@ -1,12 +1,18 @@
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view
 from django.db.models import Q
-from .models import Record, Category, Cart, CartItem, Wishlist, WishlistItem, Review
+from .models import Record, Category, Cart, CartItem, Wishlist, WishlistItem, Review, Order, OrderItem
 from .serilizers import RecordDetailSerializer, RecordListSerializer, CategorySerializer, CategoryListSerializer, CartSerializer, CartItemSerializer, WishlistSerializer, ReviewSerializer
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
+from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
+import stripe
 
 User = get_user_model()
+stripe.api_key = settings.STRIPE_SECRET_KEY
+endpoint_secret = settings.WEBHOOK_SECRET
 
 @api_view(['GET'])
 def record_list(_):
@@ -65,13 +71,20 @@ def get_all_cart_items(_):
 @api_view(['POST'])
 def add_to_cart(request):
     cart_code = request.data.get('cart_code')
-    item_id = request.data.get('item_id')
-
-    cart, _ = Cart.objects.get_or_create(cart_code=cart_code)
-    record = Record.objects.get(id=str(item_id))
-
-    cart_item, _ = CartItem.objects.get_or_create(record=record, cart=cart)
-    cart_item.quantity = 1
+    record_id = int(request.data.get('record_id'))
+    email = request.data.get('email')
+    quantity = int(request.data.get('quantity', 1))
+    user = User.objects.get(email=email) if email else None
+    if cart_code:
+        cart, _ = Cart.objects.get_or_create(cart_code=cart_code, defaults={'user': user})
+    else:
+        cart = Cart.objects.create(user=user)
+    record = Record.objects.get(id=str(record_id))
+    cart_item, created = CartItem.objects.get_or_create(cart=cart, record=record)
+    if not created:
+        cart_item.quantity += quantity
+    else:
+        cart_item.quantity = quantity
     cart_item.save()
 
     serializer = CartSerializer(cart)
@@ -92,34 +105,42 @@ def update_cart_quantity(request):
 
 @api_view(['DELETE'])
 def remove_cart_item(request):
-    cart_item_id = request.data.get('item_id')
+    cart_code = request.data.get('cart_code')
+    cart_item_id = request.data.get('record_id')
     quantity = int(request.data.get('quantity'))
     try:
-        cartitem = CartItem.objects.get(id=cart_item_id)
+        cart = Cart.objects.get(cart_code=cart_code)
+        cart_item = CartItem.objects.get(id=cart_item_id, cart=cart)
+        cart_item.quantity -= quantity
+        if cart_item.quantity > 0:
+            cart_item.save()
+        else:
+            cart_item.delete()
+        return Response({"message": "Cart item removed successfully"}, status=200)
+    except Cart.DoesNotExist:
+        return Response({"error": "Cart not found"}, status=404)
     except CartItem.DoesNotExist:
         return Response({"error": "Cart item not found"}, status=404)
-    if quantity >= 1:
-        cartitem.quantity = cartitem.quantity - quantity
-        cartitem.save()
-        message = "Cart item quantity decreased"
-    else: 
-        cartitem.delete()
-        message = "Cart item removed"
-    serializer = CartItemSerializer(cartitem)
-    return Response({"data": serializer.data, "message": message}, status=200)
-
+    
 @api_view(['DELETE'])
 def remove_all_cart_items(request):
     cart_code = request.data.get('cart_code')
     try:
         cart = Cart.objects.get(cart_code=cart_code)
-        cart_items = CartItem.objects.filter(cart=cart)
-        cart_items.delete()
+        cart.cart_items.all().delete()
         return Response({"message": "All cart items removed successfully"}, status=200)
     except Cart.DoesNotExist:
         return Response({"error": "Cart not found"}, status=404)
-    
 
+@api_view(['DELETE'])
+def delete_cart(request):
+    cart_code = request.data.get('cart_code')
+    try:
+        cart = Cart.objects.get(cart_code=cart_code)
+        cart.delete()
+        return Response({"message": "Cart deleted successfully"}, status=200)
+    except Cart.DoesNotExist:
+        return Response({"error": "Cart not found"}, status=404)
 
 @api_view(['POST'])
 def add_to_wishlist(request):
@@ -287,3 +308,82 @@ def record_search(request):
         return Response({"message": "No records found matching the query"}, status=404)
     serializer = RecordListSerializer(records, many=True)
     return Response(serializer.data)
+
+
+@api_view(['POST'])
+def create_stripe_checkout_session(request):
+    cart_code = request.data.get('cart_code')
+    email = request.data.get('email')
+    cart = Cart.objects.get(cart_code=cart_code)
+
+    if not cart or cart.cart_items.count() == 0:
+        return Response({"error": "Cart is empty or not found"}, status=400)
+    
+    try:
+        line_items = []
+        for item in cart.cart_items.all():
+            line_items.append({
+                'price_data': {
+                    'currency': 'mxn',
+                    'product_data': {
+                        'name': item.record.title,
+                    },
+                    'unit_amount': int(item.record.price * 100),
+                },
+                'quantity': item.quantity,
+            })
+
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=line_items,
+            mode='payment',
+            success_url='https://yourdomain.com/success?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url='https://yourdomain.com/cancel',
+            customer_email=email,
+            metadata={'cart_code': cart_code}
+        )
+        return Response({"checkout_url": checkout_session}, status=200)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+    
+
+def fulfill_checkout(session, cart_code):
+    order = Order.objects.create(
+                                stripe_checkout_session_id=session['id'],
+                                amount=session['amount_total'],
+                                currency=session['currency'],
+                                user_email=session['customer_email'],
+                                status='paid')
+    cart = Cart.objects.get(cart_code=cart_code)
+    cart_items = cart.cart_items.all()
+
+    for item in cart_items:
+        OrderItem.objects.create(
+            order=order,
+            record=item.record,
+            quantity=item.quantity,
+            price=item.record.price
+        )
+
+@csrf_exempt
+def stripe_webhook(request):
+    payload = request.body
+    sig_header = request.META['HTTP_STRIPE_SIGNATURE']
+    event = None
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except ValueError as e:
+        return HttpResponse(status=400)
+    except stripe.error.SignatureVerificationError as e:
+        return HttpResponse(status=400)
+
+    if event['type'] == 'checkout.session.completed' or event['type'] == 'payment_intent.succeeded':
+        session = event['data']['object']
+        cart_code = session['metadata']['cart_code']
+        fulfill_checkout(session, cart_code)
+        
+
+    return HttpResponse(status=200)

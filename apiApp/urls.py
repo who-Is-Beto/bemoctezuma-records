@@ -12,6 +12,7 @@ urlpatterns = [
     path('cart/update/', views.update_cart_quantity, name='update-cart-quantity'),
     path('cart/remove/', views.remove_cart_item, name='remove-cart-item'),
     path('cart/remove-all/', views.remove_all_cart_items, name='remove-all-cart-items'),
+    path('cart/delete/', views.delete_cart, name='delete-cart'),
     path('cart/<str:cart_code>/', views.get_cart, name='get-cart'),
     path('wishlists/add/', views.add_to_wishlist, name='add-to-wishlist'),
     path('wishlists/', views.get_all_wishlists, name='get-all-wishlists'),
@@ -23,4 +24,6 @@ urlpatterns = [
     path('reviews/delete/', views.delete_review, name='delete-review'),
     path('reviews/', views.get_all_reviews, name='get-all-reviews'),
     path('search/', views.record_search, name='record-search'),
+    path('create-checkout-session/', views.create_stripe_checkout_session, name='create-checkout-session'),
+    path('stripe-webhook/', views.stripe_webhook, name='stripe-webhook'),
 ]
