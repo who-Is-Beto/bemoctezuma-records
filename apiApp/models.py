@@ -6,6 +6,10 @@ from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.conf import settings
 
+def generate_cart_code():
+    return uuid.uuid4().hex
+
+
 class User(AbstractUser):
     profile_picture = models.URLField(blank=True, null=True)
     username = models.CharField(max_length=150, unique=True)
@@ -117,7 +121,7 @@ class Record(models.Model):
 
 class Cart(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='carts', blank=True, null=True)
-    cart_code = models.CharField(max_length=100, unique=True)
+    cart_code = models.CharField(max_length=100, unique=True, default=generate_cart_code)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -181,3 +185,31 @@ class RecordRatingSummary(models.Model):
 
     def __str__(self):
         return f"Rating Summary for {self.record.title}"
+    
+class Order(models.Model):
+    status_choices = [
+        ('pending', 'Pendiente'),
+        ('paid', 'Pagado'),
+        ('shipped', 'Enviado'),
+        ('delivered', 'Entregado'),
+        ('canceled', 'Cancelado'),
+    ]
+    stripe_checkout_session_id = models.CharField(max_length=255, unique=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=10)
+    user_email = models.EmailField()
+    status = models.CharField(max_length=50, choices=status_choices, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Orden {self.id} - {self.status}"
+    
+class OrderItem(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='order_items')
+    record = models.ForeignKey(Record, on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+
+    def __str__(self):
+        return f"{self.quantity} x {self.record.title} en la orden {self.order.id}"
