@@ -33,7 +33,8 @@ ALLOWED_HOSTS = ['*']
 CSRF_TRUSTED_ORIGINS = [
     "https://*.ngrok-free.app",
     "https://*.ngrok.app",
-    "https://karolyn-smokiest-cloyingly.ngrok-free.dev"
+    "https://karolyn-smokiest-cloyingly.ngrok-free.dev",
+    "https://moctezumarecords.com"
 ]
 
 
