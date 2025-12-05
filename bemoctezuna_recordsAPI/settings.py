@@ -30,9 +30,9 @@ SECRET_KEY = 'django-insecure-i-!0w&0$u!!!6r!@q=&gd^!2hc54@=x2zu_15&fdtz0pl$^($5
 DEBUG = True
 
 ALLOWED_HOSTS = [
-    ".railway.app",
     "moctezumarecords.com",
     "www.moctezumarecords.com",
+    "bemoctezuma-records-production.up.railway.app",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
