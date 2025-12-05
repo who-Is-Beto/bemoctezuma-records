@@ -34,7 +34,9 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.ngrok-free.app",
     "https://*.ngrok.app",
     "https://karolyn-smokiest-cloyingly.ngrok-free.dev",
-    "https://moctezumarecords.com"
+    ".railway.app",
+    "moctezumarecords.com",
+    "www.moctezumarecords.com",
 ]
 
 
