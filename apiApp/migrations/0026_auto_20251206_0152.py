@@ -10,4 +10,20 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.AlterField(
+            model_name='record',
+            name='release_date',
+            field=models.PositiveIntegerField(blank=True, null=True, default=2025),
+        ),
+
+        migrations.RunSQL(
+            sql=r"""
+                UPDATE "apiApp_record"
+                SET release_date = EXTRACT(YEAR FROM release_date)
+                WHERE release_date IS NOT NULL AND release_date::text ~ '^\d{4}-\d{2}-\d{2}$';
+            """,
+            reverse_sql=r"""
+                UPDATE "apiApp_record" SET release_date = NULL;
+            """
+        ),
     ]
