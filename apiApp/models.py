@@ -100,8 +100,9 @@ class Record(models.Model):
     discount_porcentage = models.PositiveBigIntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
     stock = models.PositiveIntegerField()
     slug = models.SlugField(default="", blank=True, null=False)
-    release_date = models.DateField()
+    release_date = models.PositiveIntegerField(blank=True, null=True, default=2025)
     featured = models.BooleanField(default=True)
+    items_inside = models.PositiveIntegerField(default=1)
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='records', blank=True, null=True)
 
     def __str__(self):
