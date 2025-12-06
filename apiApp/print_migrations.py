@@ -1,7 +1,11 @@
-from django.db import connection
+import psycopg2
+import os
 
-with connection.cursor() as cursor:
-    cursor.execute("SELECT name FROM django_migrations WHERE app = 'apiApp';")
-    rows = cursor.fetchall()
-    for row in rows:
-        print(row[0])
+conn = psycopg2.connect(os.environ["DATABASE_URL"])
+cur = conn.cursor()
+
+cur.execute("SELECT app, name FROM django_migrations ORDER BY app, name;")
+rows = cur.fetchall()
+
+for app, name in rows:
+    print(f"{app}: {name}")
