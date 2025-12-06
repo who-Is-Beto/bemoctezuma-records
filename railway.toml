@@ -1,5 +1,8 @@
 [build]
 builder = "railpack"
 
+[start]
+cmd = "python print_migrations.py"
+
 [python]
 version = "3.12"
