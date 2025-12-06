@@ -1,8 +1,0 @@
-[build]
-builder = "NIXPACKS"
-
-[start]
-cmd = "python print_migrations.py"
-
-[python]
-version = "3.12"
