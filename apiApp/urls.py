@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path('records/', views.record_list, name='records-list'),
+    path('artists/', views.artist_list, name='artist-list'),
     path('records/<slug:slug>/', views.record_detail, name='product-detail'),
     path('categories/', views.get_category_list, name='category-list'),
     path('categories/<slug:slug>/', views.get_category_detail, name='category-detail'),
@@ -23,6 +24,7 @@ urlpatterns = [
     path('reviews/update/', views.update_review, name='update-review'),
     path('reviews/delete/', views.delete_review, name='delete-review'),
     path('reviews/', views.get_all_reviews, name='get-all-reviews'),
+    path('reviews/record/<int:record_id>/', views.get_record_reviews, name='get-record-reviews'),
     path('search/', views.record_search, name='record-search'),
     path('create-checkout-session/', views.create_stripe_checkout_session, name='create-checkout-session'),
     path('stripe-webhook/', views.stripe_webhook, name='stripe-webhook'),

@@ -42,9 +42,7 @@ class Category(models.Model):
 
 class Artist(models.Model):
     name = models.CharField(max_length=255)
-    bio = models.TextField(blank=True, null=True)
     slug = models.SlugField(default="", null=False, unique=True, blank=True)
-    profile_picture_url = models.ImageField(upload_to='artist_img', blank=True, null=True)
 
     def __str__(self):
         return self.name

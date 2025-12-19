@@ -15,3 +15,4 @@ stripe==14.0.1
 typing_extensions==4.13.2
 urllib3==2.5.0
 whitenoise==6.11.0
+django-cors-headers==4.9.0

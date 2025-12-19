@@ -1,13 +1,24 @@
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view
 from django.db.models import Q
-from .models import Record, Category, Cart, CartItem, Wishlist, WishlistItem, Review, Order, OrderItem
-from .serilizers import RecordDetailSerializer, RecordListSerializer, CategorySerializer, CategoryListSerializer, CartSerializer, CartItemSerializer, WishlistSerializer, ReviewSerializer
+from .models import Record, Category, Cart, CartItem, Wishlist, WishlistItem, Review, Order, OrderItem, Artist
+from .serilizers import (
+    RecordDetailSerializer,
+    RecordListSerializer,
+    CategorySerializer,
+    CategoryListSerializer,
+    CartSerializer,
+    CartItemSerializer,
+    WishlistSerializer,
+    ReviewSerializer,
+    ArtistSerializer,
+)
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
+from .pagination import StandardResultsSetPagination
 import stripe
 
 User = get_user_model()
@@ -15,10 +26,20 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 endpoint_secret = settings.WEBHOOK_SECRET
 
 @api_view(['GET'])
-def record_list(_):
+def record_list(request):
     records = Record.objects.filter(featured=True)
-    serializer = RecordListSerializer(records, many=True)
-    return Response(serializer.data)
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(records, request)
+    serializer = RecordListSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
+
+@api_view(['GET'])
+def artist_list(request):
+    artists = Artist.objects.all().order_by('name')
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(artists, request)
+    serializer = ArtistSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
 
 @api_view(['GET'])
 def record_detail(_, slug):
@@ -276,21 +297,25 @@ def delete_review(request):
     return Response({"message": "Review deleted successfully"}, status=200)
 
 @api_view(['GET'])
-def get_record_reviews(_, record_id):
+def get_record_reviews(request, record_id):
     try:
         record = Record.objects.get(id=record_id)
     except Record.DoesNotExist:
         return Response({"error": "Record not found"}, status=404)
 
     reviews = Review.objects.filter(record=record)
-    serializer = ReviewSerializer(reviews, many=True)
-    return Response(serializer.data)
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(reviews, request)
+    serializer = ReviewSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
 
 @api_view(['GET'])
-def get_all_reviews(_):
+def get_all_reviews(request):
     reviews = Review.objects.all()
-    serializer = ReviewSerializer(reviews, many=True)
-    return Response(serializer.data)
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(reviews, request)
+    serializer = ReviewSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
 
 @api_view(['GET'])
 def record_search(request):
