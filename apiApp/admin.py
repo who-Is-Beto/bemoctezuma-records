@@ -12,12 +12,13 @@ class GenereAdmin(admin.ModelAdmin):
 admin.site.register(Genere, GenereAdmin)
 
 class ArtistAdmin(admin.ModelAdmin):
-    list_display = ('name', 'bio', 'slug', 'profile_picture_url')
+    list_display = ('name', 'slug')
     prepopulated_fields = {'slug': ('name',)}
 admin.site.register(Artist, ArtistAdmin)
 
 class RecordAdmin(admin.ModelAdmin):
     list_display = ("title", "artist", "genere", "price", "stock", "release_date", "featured")
+    prepopulated_fields = {'slug': ('title',)}
 admin.site.register(Record, RecordAdmin)
 
 class CategoryAdmin(admin.ModelAdmin):

@@ -35,6 +35,7 @@ ALLOWED_HOSTS = [
     "bemoctezuma-records-production.up.railway.app",
     "moctezumarecords.com",
     "www.moctezumarecords.com",
+    "http://localhost:5173"
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -42,6 +43,14 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.ngrok.app",
     "https://karolyn-smokiest-cloyingly.ngrok-free.dev",
     "https://moctezumarecords.com"
+]
+
+# CORS: allow frontend origins to call the API
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://moctezumarecords.com",
+    "https://www.moctezumarecords.com",
 ]
 
 
@@ -55,10 +64,12 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'apiApp',
+    'corsheaders',
     'rest_framework',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',

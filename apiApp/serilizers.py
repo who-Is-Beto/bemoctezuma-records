@@ -1,24 +1,24 @@
 from rest_framework import serializers
-from .models import Record, Category, CartItem, Cart, Wishlist, WishlistItem, Review
+from .models import Record, Category, CartItem, Cart, Wishlist, WishlistItem, Review, Artist
 from django.contrib.auth import get_user_model
+
+
+class ArtistSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Artist
+        fields = ['id', 'name', 'slug']
 class RecordDetailSerializer(serializers.ModelSerializer):
+    artist = ArtistSerializer(read_only=True)
     class Meta:
         model = Record
         fields = '__all__'
-        # fields = ['id', 'title', 'artist', 'description', 'genere', 'cover_image_url', 'price', 'discount_porcentage', 'stock', 'slug', 'release_date', 'category']
-        # extra_kwargs = {
-        #     'slug': {'required': False},
-        #     'category': {'required': False},  
-        #     'user': {'required': False},
-
+        
 class RecordListSerializer(serializers.ModelSerializer):
+    artist = ArtistSerializer(read_only=True)
     class Meta:
         model = Record
         fields = ['id', 'title', 'artist', 'genere', 'cover_image_url', 'price', 'discount_porcentage', 'stock', 'slug', 'category']
-        # extra_kwargs = {
-        #     'slug': {'required': False},
-        #     'category': {'required': False},  
-        #     'user': {'required': False},
+
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
