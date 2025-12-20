@@ -42,7 +42,11 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.ngrok-free.app",
     "https://*.ngrok.app",
     "https://karolyn-smokiest-cloyingly.ngrok-free.dev",
-    "https://moctezumarecords.com"
+    "https://moctezumarecords.com",
+    "https://www.moctezumarecords.com",
+    "https://fe-mocetzuma-records.vercel.app",
+    "https://fe-moctezuma-records.vercel.app",
+    "https://fe-mocetzuma-records-fecraqq6d-whoisbetos-projects.vercel.app",
 ]
 
 # CORS: allow frontend origins to call the API
