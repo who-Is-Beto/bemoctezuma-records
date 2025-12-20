@@ -35,6 +35,7 @@ ALLOWED_HOSTS = [
     "bemoctezuma-records-production.up.railway.app",
     "moctezumarecords.com",
     "www.moctezumarecords.com",
+    "api.moctezumarecords.com",
     "http://localhost:5173"
 ]
 
@@ -44,6 +45,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://karolyn-smokiest-cloyingly.ngrok-free.dev",
     "https://moctezumarecords.com",
     "https://www.moctezumarecords.com",
+    "https://api.moctezumarecords.com",
     "https://fe-mocetzuma-records.vercel.app",
     "https://fe-moctezuma-records.vercel.app",
     "https://fe-mocetzuma-records-fecraqq6d-whoisbetos-projects.vercel.app",
@@ -55,6 +57,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://moctezumarecords.com",
     "https://www.moctezumarecords.com",
+    "https://api.moctezumarecords.com",
     "https://fe-mocetzuma-records-fecraqq6d-whoisbetos-projects.vercel.app",
     "https://fe-moctezuma-records.vercel.app",
     "https://fe-mocetzuma-records.vercel.app",
