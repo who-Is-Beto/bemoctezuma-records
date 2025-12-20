@@ -7,18 +7,6 @@ class ArtistSerializer(serializers.ModelSerializer):
     class Meta:
         model = Artist
         fields = ['id', 'name', 'slug']
-class RecordDetailSerializer(serializers.ModelSerializer):
-    artist = ArtistSerializer(read_only=True)
-    class Meta:
-        model = Record
-        fields = '__all__'
-        
-class RecordListSerializer(serializers.ModelSerializer):
-    artist = ArtistSerializer(read_only=True)
-    class Meta:
-        model = Record
-        fields = ['id', 'title', 'artist', 'genere', 'cover_image_url', 'price', 'discount_porcentage', 'stock', 'slug', 'category']
-
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -29,6 +17,21 @@ class CategoryListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = ["id", "name", "slug"]
+
+class RecordDetailSerializer(serializers.ModelSerializer):
+    artist = ArtistSerializer(read_only=True)
+    category = CategorySerializer(read_only=True)
+    class Meta:
+        model = Record
+        fields = '__all__'
+        
+class RecordListSerializer(serializers.ModelSerializer):
+    artist = ArtistSerializer(read_only=True)
+    category = CategoryListSerializer(read_only=True)
+    class Meta:
+        model = Record
+        fields = ['id', 'title', 'condition', 'category', 'artist', 'genere', 'cover_image_url', 'price', 'discount_porcentage', 'stock', 'slug', 'category']
+
 
 class  UserSerializer(serializers.ModelSerializer):
     class Meta:
