@@ -53,7 +53,9 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.moctezumarecords.com",
     "https://fe-mocetzuma-records-fecraqq6d-whoisbetos-projects.vercel.app",
     "https://fe-moctezuma-records.vercel.app",
+    "https://fe-mocetzuma-records.vercel.app",
 ]
+CORS_ALLOW_CREDENTIALS = True
 
 
 # Application definition
