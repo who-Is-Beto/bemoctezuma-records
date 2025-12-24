@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     'apiApp',
     'corsheaders',
     'rest_framework',
+    'rest_framework_simplejwt'
 ]
 
 REST_FRAMEWORK = {
