@@ -16,6 +16,7 @@ class User(AbstractUser):
     first_name = models.CharField(max_length=150, blank=True, null=True)
     last_name = models.CharField(max_length=150, blank=True, null=True)
     email = models.EmailField(unique=True)
+    adress = models.TextField(blank=True, null=True)
     profile_picture_url = models.ImageField(blank=True, null=True)
 
     def __str__(self):
