@@ -27,5 +27,8 @@ urlpatterns = [
     path('reviews/record/<int:record_id>/', views.get_record_reviews, name='get-record-reviews'),
     path('search/', views.record_search, name='record-search'),
     path('create-checkout-session/', views.create_stripe_checkout_session, name='create-checkout-session'),
+    path('auth/register/', views.register_user, name='auth-register-user'),
+    path('auth/login/', views.login_user, name='auth-login-user'),
+    path('user/<str:username>/', views.get_user_details, name='get-user-details'),
     path('stripe-webhook/', views.stripe_webhook, name='stripe-webhook'),
 ]

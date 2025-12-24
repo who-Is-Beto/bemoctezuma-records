@@ -1,5 +1,5 @@
 from django.shortcuts import get_object_or_404
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from django.db.models import Q
 from .models import Record, Category, Cart, CartItem, Wishlist, WishlistItem, Review, Order, OrderItem, Artist
 from .serilizers import (
@@ -12,18 +12,91 @@ from .serilizers import (
     WishlistSerializer,
     ReviewSerializer,
     ArtistSerializer,
+    UserRegistrationSerializer,
+    UserSerializer
 )
 from rest_framework.response import Response
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, authenticate
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
 from .pagination import StandardResultsSetPagination
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.permissions import IsAuthenticated
 import stripe
 
 User = get_user_model()
 stripe.api_key = settings.STRIPE_SECRET_KEY
 endpoint_secret = settings.WEBHOOK_SECRET
+
+def _build_token_response(user):
+    refresh = RefreshToken.for_user(user)
+    return {"refresh": str(refresh), "access": str(refresh.access_token)}
+
+@api_view(['POST'])
+def register_user(request):
+    serializer = UserRegistrationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=400)
+
+    user = serializer.save()
+    tokens = _build_token_response(user)
+    return Response(
+        {
+            "message": f"User {user.username} registered successfully",
+            "tokens": tokens,
+        },
+        status=201,
+    )
+
+@api_view(['POST'])
+def login_user(request):
+    """
+    Authenticate user by username or email and return JWT token pair.
+    """
+    username = request.data.get("username")
+    email = request.data.get("email")
+    password = request.data.get("password")
+
+    if not password or not (username or email):
+        return Response(
+            {"error": "Provide password and either username or email"},
+            status=400,
+        )
+
+    # Allow login with email for convenience.
+    if email and not username:
+        try:
+            user_obj = User.objects.get(email=email)
+            username = user_obj.username
+        except User.DoesNotExist:
+            return Response({"error": "Invalid credentials"}, status=401)
+
+    user = authenticate(username=username, password=password)
+    if not user:
+        return Response({"error": "Invalid credentials"}, status=401)
+    if not user.is_active:
+        return Response({"error": "User is inactive"}, status=403)
+
+    tokens = _build_token_response(user)
+    return Response(
+        {
+            "message": "Login successful",
+            "tokens": tokens,
+        },
+        status=200,
+    )
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_details(_, username):
+    try:
+        user = User.objects.get(username=username)
+    except User.DoesNotExist:
+        return Response({"error": "User not found"}, status=404)
+    
+    serializer = UserSerializer(user)
+    return Response(serializer.data)
 
 @api_view(['GET'])
 def record_list(request):
@@ -68,6 +141,7 @@ def get_category_detail(_, slug):
     return Response(serializer.data)
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_cart(_, cart_code):
     try:
         cart = Cart.objects.get(cart_code=cart_code)
@@ -78,18 +152,21 @@ def get_cart(_, cart_code):
     return Response(serializer.data)
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_all_carts(_):
     carts = Cart.objects.all()
     serializer = CartSerializer(carts, many=True)
     return Response(serializer.data)
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_all_cart_items(_):
     cart_items = CartItem.objects.all()
     serializer = CartItemSerializer(cart_items, many=True)
     return Response(serializer.data)
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def add_to_cart(request):
     cart_code = request.data.get('cart_code')
     record_id = int(request.data.get('record_id'))
@@ -112,6 +189,7 @@ def add_to_cart(request):
     return Response(serializer.data)
 
 @api_view(['PUT'])
+@permission_classes([IsAuthenticated])
 def update_cart_quantity(request):
     cart_item_id = request.data.get('item_id')
     quantity = int(request.data.get('quantity'))
@@ -125,6 +203,7 @@ def update_cart_quantity(request):
     return Response({"data": serializer.data, "message": "Cart updated successfully"})
 
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
 def remove_cart_item(request):
     cart_code = request.data.get('cart_code')
     cart_item_id = request.data.get('record_id')
@@ -144,6 +223,7 @@ def remove_cart_item(request):
         return Response({"error": "Cart item not found"}, status=404)
     
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
 def remove_all_cart_items(request):
     cart_code = request.data.get('cart_code')
     try:
@@ -154,6 +234,7 @@ def remove_all_cart_items(request):
         return Response({"error": "Cart not found"}, status=404)
 
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
 def delete_cart(request):
     cart_code = request.data.get('cart_code')
     try:
@@ -164,6 +245,7 @@ def delete_cart(request):
         return Response({"error": "Cart not found"}, status=404)
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def add_to_wishlist(request):
     email = request.data.get('email')
     wishlist_code = request.data.get('wishlist_code')
@@ -185,12 +267,14 @@ def add_to_wishlist(request):
     return Response({"message": "Record added to wishlist", "wishlist": serializer.data}, status=201)
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_all_wishlists(_):
     wishlists = Wishlist.objects.all()
     serializer = WishlistSerializer(wishlists, many=True)
     return Response(serializer.data)
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_wishlist(request, wishlist_code):
     email = request.query_params.get('email')
     user = User.objects.get(email=email) if email else None
@@ -199,6 +283,7 @@ def get_wishlist(request, wishlist_code):
     return Response(serializer.data)
 
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
 def remove_from_wishlist(request):
     wishlist_code = request.data.get('wishlist_code')
     record_id = request.data.get('record_id')
@@ -218,6 +303,7 @@ def remove_from_wishlist(request):
     return Response({"message": "Record removed from wishlist", "wishlist": serializer.data}, status=200)
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_wishlist_count(request):
     wishlist_code = request.query_params.get('wishlist_code') or request.data.get('wishlist_code')
     if not wishlist_code:
@@ -336,6 +422,7 @@ def record_search(request):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def create_stripe_checkout_session(request):
     cart_code = request.data.get('cart_code')
     email = request.data.get('email')
