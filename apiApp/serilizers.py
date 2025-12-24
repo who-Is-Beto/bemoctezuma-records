@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Record, Category, CartItem, Cart, Wishlist, WishlistItem, Review, Artist
+from .models import Record, Category, CartItem, Cart, Wishlist, WishlistItem, Review, Artist, Genere
 from django.contrib.auth import get_user_model
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -41,9 +41,15 @@ class CategoryListSerializer(serializers.ModelSerializer):
         model = Category
         fields = ["id", "name", "slug"]
 
+class GenereSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Genere
+        fields = ["id", "name", "slug", "description"]
+
 class RecordDetailSerializer(serializers.ModelSerializer):
     artist = ArtistSerializer(read_only=True)
     category = CategorySerializer(read_only=True)
+    genere = GenereSerializer(read_only=True)
     class Meta:
         model = Record
         fields = '__all__'
@@ -51,6 +57,7 @@ class RecordDetailSerializer(serializers.ModelSerializer):
 class RecordListSerializer(serializers.ModelSerializer):
     artist = ArtistSerializer(read_only=True)
     category = CategoryListSerializer(read_only=True)
+    genere = GenereSerializer(read_only=True)
     class Meta:
         model = Record
         fields = ['id', 'title', 'condition', 'category', 'artist', 'genere', 'cover_image_url', 'price', 'discount_porcentage', 'stock', 'slug', 'category']
