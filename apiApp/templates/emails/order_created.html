@@ -1,0 +1,69 @@
+{% extends "emails/base.html" %}
+
+{% block preheader %}Tu orden #{{ order_id }} fue creada{% endblock %}
+
+{% block content %}
+<div>
+    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Orden #{{ order_id }}</div>
+    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">Gracias por tu compra</div>
+    <div style="color:#4f5b67;font-size:14px;margin-bottom:12px;">Tu pedido se creó correctamente. Aquí tienes los detalles:</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-radius:12px;background:#f3f7fa;color:#0f3a5c;">
+        <div>
+            <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;">Total</div>
+            <div style="font-size:20px;font-weight:700;">{{ amount_str }}</div>
+        </div>
+        <div style="text-align:right;">
+            <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;">Envío</div>
+            <div style="font-size:14px;font-weight:600;color:#0f3a5c;">{{ shipped_label }}</div>
+            <div style="font-size:12px;color:#4f5b67;">{{ tracking }}</div>
+        </div>
+    </div>
+    <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:#fef4e8;">
+        <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:10px;">Artículos</div>
+        <table style="width:100%;border-collapse:collapse;">
+            <thead>
+                <tr>
+                    <th style="text-align:left;font-size:12px;color:#4f5b67;font-weight:600;padding-bottom:6px;"></th>
+                    <th style="text-align:left;font-size:12px;color:#4f5b67;font-weight:600;padding-bottom:6px;">Producto</th>
+                    <th style="text-align:center;font-size:12px;color:#4f5b67;font-weight:600;padding-bottom:6px;">Cant.</th>
+                    <th style="text-align:right;font-size:12px;color:#4f5b67;font-weight:600;padding-bottom:6px;">Precio</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td style="padding:8px 0;">
+                        {% if item.image_url %}
+                        <img src="{{ item.image_url }}" width="48" height="48" alt="{{ item.title }}" style="border-radius:6px;object-fit:cover;">
+                        {% endif %}
+                    </td>
+                    <td style="padding:8px 0;color:#0f3a5c;font-weight:600;">{{ item.title }}</td>
+                    <td style="padding:8px 0;text-align:center;color:#0f3a5c;">{{ item.quantity }}</td>
+                    <td style="padding:8px 0;text-align:right;color:#0f3a5c;">{{ item.price_str }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="4" style="padding:8px 0;color:#0f3a5c;">Sin artículos</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if shipping %}
+    <div style="margin-top:12px;padding:12px;border-radius:12px;background:#fef4e8;">
+        <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Dirección de envío</div>
+        <div style="color:#0f3a5c;line-height:1.5;">
+            {{ shipping.fullName }}<br/>
+            {{ shipping.street }} {{ shipping.number }}<br/>
+            {{ shipping.neighborhood }}, {{ shipping.city }}<br/>
+            {{ shipping.state }} {{ shipping.zip }}<br/>
+            Tel: {{ shipping.phone }}<br/>
+            Referencia: {{ shipping.reference|default:"-" }}
+        </div>
+    </div>
+    {% endif %}
+    <div style="text-align:center;margin:24px 0 8px;">
+        <a href="{{ orders_link }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f3a5c;color:#ffffff;text-decoration:none;font-weight:700;">Ver mis órdenes</a>
+    </div>
+</div>
+{% endblock %}

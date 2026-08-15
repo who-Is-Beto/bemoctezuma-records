@@ -11,7 +11,6 @@ def generate_cart_code():
 
 
 class User(AbstractUser):
-    profile_picture = models.URLField(blank=True, null=True)
     username = models.CharField(max_length=150, unique=True)
     first_name = models.CharField(max_length=150, blank=True, null=True)
     last_name = models.CharField(max_length=150, blank=True, null=True)
@@ -197,6 +196,9 @@ class Order(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=10)
     user_email = models.EmailField()
+    shipped_to = models.CharField(max_length=255)
+    shipping_details = models.JSONField(null=True, blank=True, default=dict)
+    ship_link = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=50, choices=status_choices, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

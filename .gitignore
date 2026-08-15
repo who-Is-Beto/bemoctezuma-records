@@ -20,3 +20,4 @@ Thumbs.db
 # Python virtualenv metadata
 *.egg-info/
 .env
+.venv/

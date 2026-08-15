@@ -1,6 +1,10 @@
 from rest_framework import serializers
-from .models import Record, Category, CartItem, Cart, Wishlist, WishlistItem, Review, Artist, Genere
+from .models import Record, Category, CartItem, Cart, Wishlist, WishlistItem, Review, Artist, Genere, Order, OrderItem
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -119,3 +123,64 @@ class ReviewSerializer(serializers.ModelSerializer):
     class Meta:
         model = Review
         fields = ['id', 'user', 'rating', 'review', 'created_at', 'updated_at']
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    record = RecordListSerializer(read_only=True)
+
+    class Meta:
+        model = OrderItem
+        fields = ['id', 'record', 'quantity', 'price']
+
+class OrderSerializer(serializers.ModelSerializer):
+    order_items = OrderItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Order
+        fields = [
+            'id',
+            'stripe_checkout_session_id',
+            'amount',
+            'currency',
+            'user_email',
+            'shipped_to',
+            'shipping_details',
+            'ship_link',
+            'status',
+            'created_at',
+            'updated_at',
+            'order_items',
+        ]
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField(required=True)
+    token = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, trim_whitespace=False)
+    confirm_password = serializers.CharField(required=True, trim_whitespace=False)
+
+    def validate(self, attrs):
+        new_password = attrs.get('new_password')
+        confirm_password = attrs.get('confirm_password')
+
+        if new_password != confirm_password:
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match"})
+
+        user_model = get_user_model()
+        try:
+            uid = urlsafe_base64_decode(force_str(attrs.get('uid')))
+            user = user_model.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, user_model.DoesNotExist):
+            raise serializers.ValidationError({"token": "Invalid or expired reset token"})
+
+        if not user.is_active:
+            raise serializers.ValidationError({"token": "Invalid or expired reset token"})
+
+        if not default_token_generator.check_token(user, attrs.get('token')):
+            raise serializers.ValidationError({"token": "Invalid or expired reset token"})
+
+        validate_password(new_password, user)
+
+        self.context['user'] = user
+        return attrs
