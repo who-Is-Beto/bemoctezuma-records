@@ -27,8 +27,13 @@ urlpatterns = [
     path('reviews/record/<int:record_id>/', views.get_record_reviews, name='get-record-reviews'),
     path('search/', views.record_search, name='record-search'),
     path('create-checkout-session/', views.create_stripe_checkout_session, name='create-checkout-session'),
+    path('checkout/complete/', views.complete_checkout_session, name='complete-checkout-session'),
+    path('checkout/success/', views.checkout_success, name='checkout-success'),
+    path('orders/', views.get_user_orders, name='get-user-orders'),
     path('auth/register/', views.register_user, name='auth-register-user'),
     path('auth/login/', views.login_user, name='auth-login-user'),
+    path('auth/password-reset/', views.request_password_reset, name='password-reset-request'),
+    path('auth/password-reset/confirm/', views.confirm_password_reset, name='password-reset-confirm'),
     path('user/<str:username>/', views.get_user_details, name='get-user-details'),
     path('stripe-webhook/', views.stripe_webhook, name='stripe-webhook'),
 ]

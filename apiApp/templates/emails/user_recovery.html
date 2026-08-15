@@ -1,0 +1,26 @@
+{% extends "emails/base.html" %}
+
+{% block preheader %}Vamos a recuperar tu cuenta{% endblock %}
+
+{% block content %}
+<div style="text-align:center;">
+    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:8px;">Recuperación de cuenta</div>
+    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">Vamos a recuperar tu cuenta</div>
+    <div style="color:#4f5b67;font-size:14px;line-height:1.6;">Hola {{ user_name }},</div>
+    <div style="color:#4f5b67;font-size:14px;line-height:1.6;margin-top:8px;">
+        Hemos recibido una solicitud para recuperar tu cuenta. Aquí tienes la información que necesitas para continuar.
+    </div>
+    <div style="margin-top:16px;padding:12px;border-radius:12px;background:#fef4e8;color:#0f3a5c;font-size:14px;">
+        Tu nombre de usuario es: <strong>{{ username }}</strong>
+    </div>
+    <div style="text-align:center;margin:24px 0;">
+        <a href="{{ recovery_link }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f3a5c;color:#ffffff;text-decoration:none;font-weight:700;">Continuar con la recuperación</a>
+    </div>
+    <div style="color:#4f5b67;font-size:12px;line-height:1.6;">
+        Este enlace expira en {{ expiry_hours }} horas.
+    </div>
+    <div style="color:#4f5b67;font-size:12px;line-height:1.6;margin-top:8px;">
+        Si no solicitaste este cambio, ignora este correo y tu cuenta seguirá siendo la misma.
+    </div>
+</div>
+{% endblock %}
