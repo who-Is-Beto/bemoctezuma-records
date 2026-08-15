@@ -1,0 +1,54 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "edit": "allow",
+    "webfetch": "ask",
+    "bash": {
+      "*": "ask",
+
+      "ls*": "allow",
+      "cat *": "allow",
+      "grep *": "allow",
+      "find *": "allow",
+      "pwd": "allow",
+
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git branch*": "allow",
+      "git add *": "allow",
+      "git commit *": "ask",
+      "git push *": "deny",
+      "git reset --hard*": "deny",
+
+      "python manage.py runserver*": "allow",
+      "python manage.py check*": "allow",
+      "python manage.py test*": "allow",
+      "pytest*": "allow",
+      "python manage.py shell*": "ask",
+      "python manage.py makemigrations*": "ask",
+      "python manage.py migrate*": "ask",
+      "python manage.py createsuperuser*": "ask",
+      "python manage.py dbshell*": "ask",
+
+      "pip install *": "ask",
+
+      "rm *": "deny",
+      "rm -rf*": "deny",
+      "psql*": "deny",
+      "dropdb*": "deny"
+    }
+  },
+  "agent": {
+    "review": {
+      "description": "Read-only reviewer for Django/DRF changes — no edits, no commands. Use for PR-style review before merging.",
+      "mode": "primary",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "webfetch": "deny"
+      },
+      "prompt": "You are reviewing changes to the Moctezuma Records Django/DRF backend. Follow the conventions in AGENTS.md. Check for: bugs and edge cases, deviations from existing model/slug/choices conventions, missing input validation on serializers, N+1 queries in views (missing select_related/prefetch_related), money handled as anything other than Decimal, secrets or credentials in code, and Stripe/webhook handling issues. Only read and comment — never propose edits as diffs to apply, describe them in words instead."
+    }
+  }
+}
