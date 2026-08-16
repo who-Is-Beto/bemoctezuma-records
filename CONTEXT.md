@@ -211,15 +211,17 @@ Pre-commit review fixes applied to the uncommitted `emails` branch (no new migra
 
 ## 9. Commits, Procfile, prod incident (2026-08-16)
 
-### Commits (nothing pushed to GitHub yet)
+### Commits — ALL PUSHED & MERGED to main as of 2026-08-16
 - Backend (`bemoctezuma_records`, branch `emails`):
   - `079c3e9` — email verification, seller notifications, cart input hardening
-    (includes migrations `0036`/`0037`, templates, tests, docs, `scripts/`).
-  - `2f1ce33` — `Procfile` added.
+    (includes migrations `0036`/`0037`, templates, tests, docs, `scripts/`). → PR #22, merged.
+  - `2f1ce33` — `Procfile` added. → PR #23, merged.
   - `9a6f229` — CONTEXT.md update.
   - `a299fd9` — **`.env.local` footgun fix** (see below).
+  - `78215d2` — `EMAIL_TIMEOUT` fix (see §10) → pushed, merged, deployed. Register now returns 201.
+  - `3664bfd` — CONTEXT.md update (was local-only, now pushed with 78215d2).
 - Frontend (`femoctezuma-records`, branch `2fa`): `f1653aa` — email verification UX,
-  cart & orders pages, share button, session persistence.
+  cart & orders pages, share button, session persistence. → PR #15, merged.
 
 ### Procfile (new)
 - `release: python manage.py migrate` → Railway runs migrations BEFORE the web process
@@ -238,12 +240,10 @@ Pre-commit review fixes applied to the uncommitted `emails` branch (no new migra
   kept 500ing.
 - **Fix (`a299fd9`):** `.env.local` is now only loaded when `RAILWAY_ENVIRONMENT` is
   unset (deployed services and `railway run` both set it) → CLI commands hit prod.
-- **Pending (user, not this machine):** re-run
-  `railway run python manage.py migrate` from the repo root; verify the host is
-  `interchange.proxy.rlwy.net` before trusting `showmigrations`.
-- **Watch out:** `REQUIRE_EMAIL_VERIFICATION=true` is ALREADY set in Railway while 0037
-  has not run on prod → existing customers are effectively locked out until the migrate
-  lands. Do the migrate ASAP.
+- **RESOLVED:** `railway run showmigrations` now hits the real prod DB
+  (`interchange.proxy.rlwy.net`), and `[X] 0036/0037` are confirmed applied there.
+  Existing customers are NOT locked out (0037 marked them verified; verified via
+  `/auth/login/` returning 401 for bad creds instead of a 500 on the missing column).
 - Lesson: never trust `railway run ...` output without confirming the DB host; the
   `.env.local` override was a silent footgun (now fixed in code).
 
@@ -270,3 +270,58 @@ Pre-commit review fixes applied to the uncommitted `emails` branch (no new migra
 6. **Must set `VITE_API_URL` in Vercel** pointing at the Railway backend — the dev proxy
    was removed from `vite.config.ts`, and the fallback default is `http://localhost:8008`.
 7. Smoke test: register → real email → verify → cart → Stripe (test mode) → `/mis-ordenes`.
+
+## 10. Register 500 root-caused + email switched to Resend (2026-08-16)
+
+### The register 500 was NEVER migrations — it was a hung SMTP connect
+- Migrations 0036/0037 are applied on prod (confirmed via `railway run showmigrations`
+  hitting the real DB + `/auth/login/` returning 401, not 500).
+- Real root cause (from `railway logs`): `WORKER TIMEOUT` on every `/auth/register/`.
+  The container cannot reach `smtp.gmail.com:587` — the TCP `connect()` hung (no
+  `EMAIL_TIMEOUT` set → indefinite block), the gunicorn worker died at its 30s timeout,
+  and the client got a 500. The view's `try/except` can't catch a *hang*, only a raised
+  exception.
+- **Fix (`78215d2`, pushed/merged/deployed):** `EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '10'))`
+  in `settings.py` + regression test `apiApp/tests/test_register_repro.py`
+  (register returns 201 even when the email backend raises). Register now returns **201**
+  and logs `Verification email failed for user N: [Errno 101] Network is unreachable`.
+- **Definitive diagnosis:** `[Errno 101] Network is unreachable` on `sock.connect` →
+  Railway blocks outbound SMTP (ports 25/465/587). SMTP from the container is dead;
+  emails have likely never been deliverable from prod.
+
+### Email delivery switched to Resend via django-anymail (UNCOMMITTED)
+- SMTP is a dead end on Railway → HTTP email API on port 443 (same path as Stripe).
+- `requirements.txt`: `+ django-anymail==15.1` (installed locally).
+- `settings.py`: `EMAIL_BACKEND` auto-selects `anymail.backends.resend.EmailBackend`
+  when `RESEND_API_KEY` is present, else console (local dev keeps working); added
+  `ANYMAIL = {'RESEND_API_KEY': os.getenv('RESEND_API_KEY')}`. `emails.py` untouched —
+  Anymail is a drop-in Django email backend.
+- `EMAIL_TIMEOUT` still applies (Anymail honors it).
+- Tests: **68 passed**, `manage.py check` clean.
+
+### Railway deploy steps for the email switch (user action)
+1. Create a Resend account; **verify the `moctezumarecords.com` domain** (DNS records).
+2. Railway vars: add `RESEND_API_KEY`; **delete `EMAIL_BACKEND`** (it's currently set to
+   the SMTP backend and would override the auto-selection) or set it explicitly to
+   `anymail.backends.resend.EmailBackend`.
+3. Change `DEFAULT_FROM_EMAIL` in Railway to an `@moctezumarecords.com` address (Resend
+   will not send from the gmail address). The old SMTP vars (`EMAIL_HOST`,
+   `EMAIL_HOST_PASSWORD`, `EMAIL_PORT`, `EMAIL_USE_TLS`) become inert — safe to remove.
+4. Push/merge `emails` → Railway deploy → `railway ssh` egress to `smtp.gmail.com` is no
+   longer required (nothing in the app talks SMTP anymore).
+5. Smoke: register → check Resend dashboard for welcome + verify emails.
+
+### Environment findings (non-secret)
+- Railway has `DEBUG=False`, `FRONTEND_URL=https://moctezumarecords.com/`,
+  `REQUIRE_EMAIL_VERIFICATION=true`, `DJANGO_SECRET_KEY` set (settings reads
+  `DJANGO_SECRET_KEY`, so the inert `SECRET_KEY=django-insecure-…` var is dead weight —
+  safe to delete). CORS is hardcoded in `settings.py` and already covers
+  `https://moctezumarecords.com` + Vercel preview domains.
+- `DB=True` is sloppy but harmless (`settings.py` treats any truthy string as "use Postgres").
+- **SECURITY NOTE:** `railway variables` output leaked into the chat a SECOND time
+  (same live secrets). Rotate: `STRIPE_SECRET_KEY` (sk_live, first), `PG_PASSWORD`,
+  `EMAIL_HOST_PASSWORD`, `DJANGO_SECRET_KEY`, `WEBHOOK_SECRET`. Do NOT paste env values
+  into chats; list names only, or use `railway run python -c "print(os.getenv(...))"` for
+  specific non-secret keys.
+- A probe user `smoketest_x1` (id 20) exists in prod from the smoke test — harmless, can
+  be deleted via admin.

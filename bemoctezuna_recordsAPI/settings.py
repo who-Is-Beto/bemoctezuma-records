@@ -232,8 +232,17 @@ SELLER_NOTIFY_EMAILS = [
     if email.strip()
 ]
 
-# Email (defaults to console backend; override via env in prod)
-EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+# Email (defaults to console backend; use env to override in prod)
+# Railway blocks outbound SMTP (see CONTEXT.md), so prod sends via the
+# Resend HTTP API through django-anymail whenever RESEND_API_KEY is present.
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND') or (
+    'anymail.backends.resend.EmailBackend'
+    if os.getenv('RESEND_API_KEY')
+    else 'django.core.mail.backends.console.EmailBackend'
+)
+ANYMAIL = {
+    'RESEND_API_KEY': os.getenv('RESEND_API_KEY'),
+}
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'no-reply@moctezumarecords.com')
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
