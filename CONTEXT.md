@@ -216,6 +216,8 @@ Pre-commit review fixes applied to the uncommitted `emails` branch (no new migra
   - `079c3e9` — email verification, seller notifications, cart input hardening
     (includes migrations `0036`/`0037`, templates, tests, docs, `scripts/`).
   - `2f1ce33` — `Procfile` added.
+  - `9a6f229` — CONTEXT.md update.
+  - `a299fd9` — **`.env.local` footgun fix** (see below).
 - Frontend (`femoctezuma-records`, branch `2fa`): `f1653aa` — email verification UX,
   cart & orders pages, share button, session persistence.
 
@@ -226,23 +228,44 @@ Pre-commit review fixes applied to the uncommitted `emails` branch (no new migra
 - This fixes the root cause of the prod incident below: deploys previously had NO
   migrate step (no Procfile/Dockerfile in repo — Railway default buildpack only).
 
-### Prod incident: register 500 "column apiApp_user.email_verified does not exist"
-- After deploying the new code, creating a user in prod threw a 500: `email_verified`
-  has `default=False`, so every `INSERT` includes the column — but prod had never run
-  migrations 0036/0037 (deploy had no migrate step).
-- Fix (run by user, NOT from this machine): `railway run python manage.py migrate`
-  (idempotent; 0037 marks existing users verified). Verify with
-  `railway run python manage.py showmigrations apiApp`.
-- Lesson: any new model field now lands via the Procfile `release` phase automatically.
+### Prod incident (act 2): `railway run` silently hit the LOCAL DB
+- Root cause of the *persistent* register 500: `settings.py` called
+  `load_dotenv(".env.local", override=True)` — `override=True` means local values BEAT
+  the env vars `railway run` injects, so `railway run python manage.py migrate` (and
+  `showmigrations`, `shell`) connected to `moctezuma_records_dev` @ `127.0.0.1`, NOT prod
+  (`railway` @ `interchange.proxy.rlwy.net`). The `[X] 0036/0037` list seen was the LOCAL
+  DB state. Prod still had no column → register (and login, `SELECT` fetches all columns)
+  kept 500ing.
+- **Fix (`a299fd9`):** `.env.local` is now only loaded when `RAILWAY_ENVIRONMENT` is
+  unset (deployed services and `railway run` both set it) → CLI commands hit prod.
+- **Pending (user, not this machine):** re-run
+  `railway run python manage.py migrate` from the repo root; verify the host is
+  `interchange.proxy.rlwy.net` before trusting `showmigrations`.
+- **Watch out:** `REQUIRE_EMAIL_VERIFICATION=true` is ALREADY set in Railway while 0037
+  has not run on prod → existing customers are effectively locked out until the migrate
+  lands. Do the migrate ASAP.
+- Lesson: never trust `railway run ...` output without confirming the DB host; the
+  `.env.local` override was a silent footgun (now fixed in code).
+
+### Security incident: LIVE prod secrets pasted into chat (2026-08-16)
+- The user's `railway variables` output (pasted into the assistant session) exposed real
+  working credentials: `STRIPE_SECRET_KEY` (sk_live), `PG_PASSWORD`, `EMAIL_HOST_PASSWORD`
+  (Gmail app password), `DJANGO_SECRET_KEY` + `SECRET_KEY`, `WEBHOOK_SECRET`.
+- **Recommended action: rotate all of the above** (Stripe key first — it can move money),
+  update Railway vars + local `.env`. Rotating `SECRET_KEY` logs everyone out and
+  invalidates outstanding verification/reset links. `STRIPE_PUBLISHABLE_KEY` is public by
+  design — no action. Never paste `railway variables` output into a chat again.
 
 ### Deploy order (backend first)
 1. `git push -u origin emails` (backend) → PR → merge to `main` → Railway deploy runs
    migrations via `release`.
-2. Verify live: `POST /auth/verify-email/` and `GET /auth/me/` exist (not 404).
+2. Verify live: `POST /auth/verify-email/` and `GET /auth/me/` exist (not 404). (Confirmed
+   already: they return 401/400 — new code IS live; only the migrate was missing.)
 3. Check Railway env: `EMAIL_HOST`/`EMAIL_HOST_USER`/`EMAIL_HOST_PASSWORD`/`EMAIL_USE_TLS`
    and `FRONTEND_URL` (else the welcome/verify emails silently fail and links point at
-   localhost).
-4. Optionally set `REQUIRE_EMAIL_VERIFICATION=true` in Railway (0037 prevents lockouts).
+   localhost). — All present, plus `FRONTEND_URL=https://moctezumarecords.com/`.
+4. `REQUIRE_EMAIL_VERIFICATION=true` — **already set in prod**; ensure 0037 runs (marks
+   existing users verified) before trusting the flag.
 5. `git push -u origin 2fa` (frontend) → PR → merge to `main` → Vercel auto-deploys.
 6. **Must set `VITE_API_URL` in Vercel** pointing at the Railway backend — the dev proxy
    was removed from `vite.config.ts`, and the fallback default is `http://localhost:8008`.
