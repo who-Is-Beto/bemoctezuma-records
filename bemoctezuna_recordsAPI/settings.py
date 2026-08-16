@@ -17,7 +17,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 # Local overrides (dev/staging) — gitignored, wins over .env. No-op when absent.
-load_dotenv(".env.local", override=True)
+# Skipped when RAILWAY_ENVIRONMENT is set (deployed services AND `railway run`
+# both set it) so CLI commands like `railway run python manage.py migrate`
+# always target the PROD database instead of silently hitting the local one.
+if not os.getenv('RAILWAY_ENVIRONMENT'):
+    load_dotenv(".env.local", override=True)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
