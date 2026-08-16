@@ -19,8 +19,8 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Artist, Cart, CartItem, Category, Order, OrderItem, Record, Review, Wishlist, WishlistItem
-from .emails import send_password_recovery_email
-from .services import send_order_created_email
+from .emails import send_password_recovery_email, send_verification_email, send_welcome_email
+from .services import send_order_created_email, send_order_notification_email
 from .pagination import StandardResultsSetPagination
 from .serilizers import (
     ArtistSerializer,
@@ -36,6 +36,7 @@ from .serilizers import (
     ReviewSerializer,
     UserRegistrationSerializer,
     UserSerializer,
+    VerifyEmailSerializer,
     WishlistSerializer,
 )
 import stripe
@@ -49,11 +50,34 @@ def _build_token_response(user):
     refresh = RefreshToken.for_user(user)
     return {"refresh": str(refresh), "access": str(refresh.access_token)}
 
+def _build_verification_link(user):
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    return f"{settings.FRONTEND_URL.rstrip('/')}/verificar-correo?uid={uid}&token={token}"
+
 def error_response(message, status_code=400, code="error", details=None):
     payload = {"error": {"code": code, "message": message}}
     if details is not None:
         payload["error"]["details"] = details
     return Response(payload, status=status_code)
+
+def _require_email_verified(request):
+    """Block authenticated-but-unverified users from purchasing flows.
+
+    Only fires when REQUIRE_EMAIL_VERIFICATION is enabled. Returns an error
+    Response when the user must verify their email first, otherwise None.
+    """
+    if (
+        settings.REQUIRE_EMAIL_VERIFICATION
+        and request.user.is_authenticated
+        and not request.user.email_verified
+    ):
+        return error_response(
+            "Verifica tu correo para continuar. Revisa tu bandeja de entrada o pide un nuevo enlace desde tu perfil.",
+            status_code=403,
+            code="email_not_verified",
+        )
+    return None
 
 @api_view(['POST'])
 def register_user(request):
@@ -62,11 +86,23 @@ def register_user(request):
         return Response(serializer.errors, status=400)
 
     user = serializer.save()
+
+    try:
+        send_welcome_email(user)
+    except Exception as exc:
+        logger.warning("Welcome email failed for new user %s: %s", user.id, exc)
+
+    try:
+        send_verification_email(user, _build_verification_link(user))
+    except Exception as exc:
+        logger.warning("Verification email failed for new user %s: %s", user.id, exc)
+
     tokens = _build_token_response(user)
     return Response(
         {
             "message": f"User {user.username} registered successfully",
             "tokens": tokens,
+            "email_verified": user.email_verified,
         },
         status=201,
     )
@@ -99,12 +135,19 @@ def login_user(request):
         return error_response("Invalid credentials", status_code=401, code="invalid_credentials")
     if not user.is_active:
         return error_response("User is inactive", status_code=403, code="user_inactive")
+    if settings.REQUIRE_EMAIL_VERIFICATION and not user.email_verified:
+        return error_response(
+            "Please verify your email before signing in",
+            status_code=403,
+            code="email_not_verified",
+        )
 
     tokens = _build_token_response(user)
     return Response(
         {
             "message": "Login successful",
             "tokens": tokens,
+            "email_verified": user.email_verified,
         },
         status=200,
     )
@@ -149,6 +192,54 @@ def confirm_password_reset(request):
     return Response({"message": "Password reset successfully"}, status=200)
 
 confirm_password_reset.view_class.throttle_scope = 'password_reset'
+
+@api_view(['POST'])
+def verify_email(request):
+    serializer = VerifyEmailSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=400)
+
+    user = serializer.context['user']
+    if user.email_verified:
+        return Response({"message": "Email already verified", "email_verified": True}, status=200)
+
+    user.email_verified = True
+    user.save(update_fields=['email_verified'])
+    logger.info("Email verified for user %s", user.id)
+    return Response({"message": "Email verified successfully", "email_verified": True}, status=200)
+
+@api_view(['POST'])
+@throttle_classes([ScopedRateThrottle])
+def resend_verification_email(request):
+    email = request.data.get('email')
+    if not email:
+        return error_response("email is required", status_code=400, code="email_required")
+
+    # Case-insensitive match: users often type the same email with different
+    # casing than the one stored at registration.
+    user = User.objects.filter(email__iexact=email).first()
+
+    if user is not None and not user.email_verified:
+        try:
+            send_verification_email(user, _build_verification_link(user))
+        except Exception as exc:
+            logger.warning("Verification email resend failed for user %s: %s", user.id, exc)
+
+    return Response({"message": "If that email is registered, a verification link has been sent"}, status=200)
+
+resend_verification_email.view_class.throttle_scope = 'email_verify'
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_me(request):
+    """Return the authenticated user's profile, including email_verified.
+
+    The frontend uses this to re-sync the authoritative verification status
+    on app load (e.g. after verifying in another tab or upgrading from a
+    session stored before the email-verification feature existed).
+    """
+    serializer = UserSerializer(request.user)
+    return Response(serializer.data)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -205,7 +296,10 @@ def get_category_detail(_, slug):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def get_cart(_, cart_code):
+def get_cart(request, cart_code):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     try:
         cart = Cart.objects.get(cart_code=cart_code)
     except Cart.DoesNotExist:
@@ -216,14 +310,20 @@ def get_cart(_, cart_code):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def get_all_carts(_):
+def get_all_carts(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     carts = Cart.objects.all()
     serializer = CartSerializer(carts, many=True)
     return Response(serializer.data)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def get_all_cart_items(_):
+def get_all_cart_items(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     cart_items = CartItem.objects.all()
     serializer = CartItemSerializer(cart_items, many=True)
     return Response(serializer.data)
@@ -231,26 +331,46 @@ def get_all_cart_items(_):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def add_to_cart(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     cart_code = request.data.get('cart_code')
-    record_id = int(request.data.get('record_id'))
+    try:
+        record_id = int(request.data.get('record_id'))
+    except (TypeError, ValueError):
+        return error_response("record_id is required", status_code=400, code="record_id_required")
     email = request.data.get('email')
-    quantity = int(request.data.get('quantity', 1))
+    try:
+        quantity = int(request.data.get('quantity', 1))
+    except (TypeError, ValueError):
+        return error_response("quantity must be a number", status_code=400, code="quantity_invalid")
+    if quantity < 1:
+        return error_response("quantity must be at least 1", status_code=400, code="quantity_invalid")
     user = User.objects.get(email=email) if email else None
     if cart_code:
         cart, _ = Cart.objects.get_or_create(cart_code=cart_code, defaults={'user': user})
     else:
         cart = Cart.objects.create(user=user)
-    record = Record.objects.get(id=str(record_id))
-    cart_item, created = CartItem.objects.get_or_create(cart=cart, record=record)
-    new_quantity = cart_item.quantity + quantity if not created else quantity
+    try:
+        record = Record.objects.get(id=str(record_id))
+    except Record.DoesNotExist:
+        return error_response("Record not found", status_code=404, code="product_not_found")
+    existing = CartItem.objects.filter(cart=cart, record=record).first()
+    current_quantity = existing.quantity if existing else 0
+    new_quantity = current_quantity + quantity
     if new_quantity > record.stock:
+        # Validate stock BEFORE creating/updating the CartItem so an
+        # over-stock request never leaves a phantom item in the cart.
         return error_response(
             "No hay suficiente stock disponible. Intenta con una cantidad menor.",
             status_code=400,
             code="stock_insuficiente",
         )
-    cart_item.quantity = new_quantity
-    cart_item.save()
+    if existing:
+        existing.quantity = new_quantity
+        existing.save()
+    else:
+        CartItem.objects.create(cart=cart, record=record, quantity=new_quantity)
 
     serializer = CartSerializer(cart)
     return Response(serializer.data)
@@ -258,10 +378,21 @@ def add_to_cart(request):
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def update_cart_quantity(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     cart_item_id = request.data.get('item_id')
-    quantity = int(request.data.get('quantity'))
+    try:
+        quantity = int(request.data.get('quantity'))
+    except (TypeError, ValueError):
+        return error_response("quantity must be a number", status_code=400, code="quantity_invalid")
+    if quantity < 1:
+        return error_response("quantity must be at least 1", status_code=400, code="quantity_invalid")
 
-    cartitem = CartItem.objects.get(id=cart_item_id)
+    try:
+        cartitem = CartItem.objects.get(id=cart_item_id)
+    except CartItem.DoesNotExist:
+        return error_response("Cart item not found", status_code=404, code="cart_item_not_found")
     if quantity > cartitem.record.stock:
         return error_response(
             "No hay suficiente stock disponible. Intenta con una cantidad menor.",
@@ -278,6 +409,9 @@ def update_cart_quantity(request):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def remove_cart_item(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     cart_code = request.data.get('cart_code')
     record_id = request.data.get('record_id')
 
@@ -297,6 +431,9 @@ def remove_cart_item(request):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def remove_all_cart_items(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     cart_code = request.data.get('cart_code')
     try:
         cart = Cart.objects.get(cart_code=cart_code)
@@ -308,6 +445,9 @@ def remove_all_cart_items(request):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_cart(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     cart_code = request.data.get('cart_code')
     try:
         cart = Cart.objects.get(cart_code=cart_code)
@@ -504,6 +644,9 @@ def record_search(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_stripe_checkout_session(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     cart_code = request.data.get('cart_code')
     email = getattr(request.user, 'email', None)
     shipped_to = request.data.get('shipped_to')
@@ -568,6 +711,7 @@ def create_stripe_checkout_session(request):
             payment_method_types=['card'],
             line_items=line_items,
             mode='payment',
+            locale='es',
             success_url=success_url,
             cancel_url=f"{settings.FRONTEND_URL.rstrip('/')}/carrito",
             customer_email=email,
@@ -716,6 +860,11 @@ def fulfill_checkout(session, cart_code=None):
         send_order_created_email(order)
     except Exception as exc:
         logger.warning("Order created but email notification failed for %s: %s", order.id, exc)
+
+    try:
+        send_order_notification_email(order)
+    except Exception as exc:
+        logger.warning("Order created but seller notification failed for %s: %s", order.id, exc)
 @csrf_exempt
 def stripe_webhook(request):
     payload = request.body
@@ -807,6 +956,9 @@ def stripe_webhook(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def complete_checkout_session(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     session_id = (request.data.get('session_id') or '').strip()
 
     if not session_id:
@@ -851,11 +1003,14 @@ def checkout_success(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_user_orders(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
     email = getattr(request.user, 'email', None)
 
     if not email:
         return error_response("User email not found", status_code=400, code="user_email_missing")
 
-    orders = Order.objects.filter(user_email=email).order_by('-created_at')
+    orders = Order.objects.filter(user_email=email).order_by('-created_at').prefetch_related('order_items__record')
     serializer = OrderSerializer(orders, many=True)
     return Response(serializer.data, status=200)

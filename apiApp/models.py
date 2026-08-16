@@ -17,6 +17,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     adress = models.TextField(blank=True, null=True)
     profile_picture_url = models.ImageField(blank=True, null=True)
+    email_verified = models.BooleanField(default=False)
 
     def __str__(self):
         return self.username
