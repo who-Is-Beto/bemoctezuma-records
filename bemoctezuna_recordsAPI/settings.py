@@ -16,6 +16,8 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+# Local overrides (dev/staging) — gitignored, wins over .env. No-op when absent.
+load_dotenv(".env.local", override=True)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -86,6 +88,7 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_THROTTLE_RATES': {
         'password_reset': '5/hour',
+        'email_verify': '5/hour',
     },
 }
 
@@ -211,6 +214,19 @@ STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET') or os.getenv('WEBHOOK_SECRET')
 WEBHOOK_SECRET = STRIPE_WEBHOOK_SECRET
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
+# Email verification: set to True to block login until the email is verified.
+REQUIRE_EMAIL_VERIFICATION = os.getenv('REQUIRE_EMAIL_VERIFICATION', 'False').lower() == 'true'
+
+# Who gets a notification when a customer places an order (comma-separated env).
+SELLER_NOTIFY_EMAILS = [
+    email.strip()
+    for email in os.getenv(
+        'SELLER_NOTIFY_EMAILS',
+        'moctezumarecords0@gmail.com,whoisbeto@gmail.com',
+    ).split(',')
+    if email.strip()
+]
 
 # Email (defaults to console backend; override via env in prod)
 EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')

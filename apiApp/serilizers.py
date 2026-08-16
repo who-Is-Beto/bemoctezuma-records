@@ -28,7 +28,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = get_user_model()
-        fields = ['id', 'username', 'email', 'first_name', 'last_name']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'email_verified']
 
 class ArtistSerializer(serializers.ModelSerializer):
     class Meta:
@@ -70,7 +70,7 @@ class RecordListSerializer(serializers.ModelSerializer):
 class  UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = get_user_model()
-        fields = ['id', 'username', 'email', 'first_name', 'last_name']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'email_verified']
 
 class CartItemSerializer(serializers.ModelSerializer):
     record = RecordListSerializer(read_only=True)
@@ -153,6 +153,27 @@ class OrderSerializer(serializers.ModelSerializer):
 
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
+
+class VerifyEmailSerializer(serializers.Serializer):
+    uid = serializers.CharField(required=True)
+    token = serializers.CharField(required=True)
+
+    def validate(self, attrs):
+        user_model = get_user_model()
+        try:
+            uid = urlsafe_base64_decode(force_str(attrs.get('uid')))
+            user = user_model.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, user_model.DoesNotExist):
+            raise serializers.ValidationError({"token": "Invalid or expired verification link"})
+
+        if not user.is_active:
+            raise serializers.ValidationError({"token": "Invalid or expired verification link"})
+
+        if not default_token_generator.check_token(user, attrs.get('token')):
+            raise serializers.ValidationError({"token": "Invalid or expired verification link"})
+
+        self.context['user'] = user
+        return attrs
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     uid = serializers.CharField(required=True)

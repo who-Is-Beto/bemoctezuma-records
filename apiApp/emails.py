@@ -157,3 +157,34 @@ def send_user_recovery_email(user, recovery_link, expiry_hours=24):
         subject="Recuperación de cuenta — Moctezuma Records",
         to=[user],
     )
+
+
+def send_welcome_email(user):
+    """Send the welcome email to a newly registered user."""
+    context = {
+        "user_name": user.first_name or user.username,
+        "username": user.username,
+        "frontend_url": settings.FRONTEND_URL,
+    }
+    send_email(
+        template_name="welcome",
+        context=context,
+        subject="¡Bienvenido a Moctezuma Records!",
+        to=[user],
+    )
+
+
+def send_verification_email(user, verification_link, expiry_hours=24):
+    """Send the email-verification link to a user."""
+    context = {
+        "user_name": user.first_name or user.username,
+        "verification_link": verification_link,
+        "expiry_hours": expiry_hours,
+        "frontend_url": settings.FRONTEND_URL,
+    }
+    send_email(
+        template_name="verify_email",
+        context=context,
+        subject="Confirma tu correo — Moctezuma Records",
+        to=[user],
+    )

@@ -1,12 +1,15 @@
 {% extends "emails/base.html" %}
 
-{% block preheader %}Tu orden #{{ order_id }} fue creada{% endblock %}
+{% block preheader %}Nueva orden #{{ order_id }}{% endblock %}
 
 {% block content %}
 <div>
     <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Orden #{{ order_id }}</div>
-    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">Gracias por tu compra</div>
-    <div style="color:#4f5b67;font-size:14px;margin-bottom:12px;">Tu pedido se creó correctamente. Aquí tienes los detalles:</div>
+    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">¡Nueva compra!</div>
+    <div style="color:#4f5b67;font-size:14px;margin-bottom:12px;">
+        Un cliente realizó un pedido y ya fue pagado. Prepáralo en el mundo real.
+    </div>
+
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f7fa;border-radius:12px;">
         <tr>
             <td style="padding:14px 16px;color:#0f3a5c;">
@@ -15,11 +18,17 @@
             </td>
             <td style="padding:14px 16px;text-align:right;color:#0f3a5c;">
                 <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;">Envío</div>
-                <div style="font-size:14px;font-weight:600;color:#0f3a5c;">{{ shipped_label }}</div>
+                <div style="font-size:14px;font-weight:600;">{{ shipped_label }}</div>
                 <div style="font-size:12px;color:#4f5b67;">{{ tracking }}</div>
             </td>
         </tr>
     </table>
+
+    <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:#fef4e8;">
+        <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Cliente</div>
+        <div style="color:#0f3a5c;font-weight:600;">{{ customer_email }}</div>
+    </div>
+
     <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:#fef4e8;">
         <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:10px;">Artículos</div>
         <table style="width:100%;border-collapse:collapse;">
@@ -51,8 +60,9 @@
             </tbody>
         </table>
     </div>
+
     {% if shipping %}
-    <div style="margin-top:12px;padding:12px;border-radius:12px;background:#fef4e8;">
+    <div style="margin-top:16px;padding:12px;border-radius:12px;background:#fef4e8;">
         <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Dirección de envío</div>
         <div style="color:#0f3a5c;line-height:1.5;">
             {{ shipping.fullName }}<br/>
@@ -64,8 +74,9 @@
         </div>
     </div>
     {% endif %}
+
     <div style="text-align:center;margin:24px 0 8px;">
-        <a href="{{ orders_link }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f3a5c;color:#ffffff;text-decoration:none;font-weight:700;">Ver mis órdenes</a>
+        <a href="{{ orders_link }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f3a5c;color:#ffffff;text-decoration:none;font-weight:700;">Ver en la tienda</a>
     </div>
 </div>
 {% endblock %}

@@ -41,14 +41,13 @@
   },
   "agent": {
     "review": {
-      "description": "Read-only reviewer for Django/DRF changes — no edits, no commands. Use for PR-style review before merging.",
+      "description": "Reviewer for Django/DRF changes — can read, edit, and run safe commands. Use for PR-style review and implementation.",
       "mode": "primary",
       "permission": {
-        "edit": "deny",
-        "bash": "deny",
-        "webfetch": "deny"
+        "edit": "allow",
+        "webfetch": "ask"
       },
-      "prompt": "You are reviewing changes to the Moctezuma Records Django/DRF backend. Follow the conventions in AGENTS.md. Check for: bugs and edge cases, deviations from existing model/slug/choices conventions, missing input validation on serializers, N+1 queries in views (missing select_related/prefetch_related), money handled as anything other than Decimal, secrets or credentials in code, and Stripe/webhook handling issues. Only read and comment — never propose edits as diffs to apply, describe them in words instead."
+      "prompt": "You are a coding assistant for the Moctezuma Records Django/DRF backend. Follow the conventions in AGENTS.md and read CONTEXT.md at the repo root first — it documents the recently implemented email-verification feature, the local Postgres setup with the prod data copy, and the current uncommitted state of both repos. Check for: bugs and edge cases, deviations from existing model/slug/choices conventions, missing input validation on serializers, N+1 queries in views (missing select_related/prefetch_related), money handled as anything other than Decimal, secrets or credentials in code, and Stripe/webhook handling issues. You may propose and apply edits to the codebase."
     }
   }
 }

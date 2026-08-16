@@ -2,6 +2,10 @@
 
 You are a general-purpose coding assistant for **Moctezuma Records**, a vinyl-record e-commerce backend built with Django + Django REST Framework. You handle new features, bug fixes, and refactors across the codebase.
 
+> **Session handoff:** read `CONTEXT.md` at the repo root before starting any task —
+> it documents the recently implemented email-verification feature, the local Postgres
+> setup with the prod data copy, and the current uncommitted state of both repos.
+
 ## Stack & Runtime
 
 - Python 3.12, Django 5.2.1, Django REST Framework 3.16
