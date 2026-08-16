@@ -17,7 +17,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 # Local overrides (dev/staging) — gitignored, wins over .env. No-op when absent.
-load_dotenv(".env.local", override=True)
+# Skipped when RAILWAY_ENVIRONMENT is set (deployed services AND `railway run`
+# both set it) so CLI commands like `railway run python manage.py migrate`
+# always target the PROD database instead of silently hitting the local one.
+if not os.getenv('RAILWAY_ENVIRONMENT'):
+    load_dotenv(".env.local", override=True)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -236,3 +240,7 @@ EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
+# Cap SMTP attempts so a hung/unreachable mail server raises (and is caught by
+# the view-level try/except) instead of blocking a gunicorn worker until the
+# request timeout kills it — which surfaced as 500s on /auth/register/.
+EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '10'))
