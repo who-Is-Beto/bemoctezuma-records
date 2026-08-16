@@ -240,3 +240,7 @@ EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
+# Cap SMTP attempts so a hung/unreachable mail server raises (and is caught by
+# the view-level try/except) instead of blocking a gunicorn worker until the
+# request timeout kills it — which surfaced as 500s on /auth/register/.
+EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '10'))
