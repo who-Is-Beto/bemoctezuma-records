@@ -254,7 +254,18 @@ def get_user_details(_, username):
 
 @api_view(['GET'])
 def record_list(request):
-    records = Record.objects.filter(featured=True)
+    records = Record.objects.filter(featured=True).order_by('-id')
+
+    # ?category=lp,7,cd,... -> filter by category slug
+    category = request.query_params.get('category')
+    if category:
+        records = records.filter(category__slug=category)
+
+    # ?available=true -> only records with at least 1 item in stock
+    available = request.query_params.get('available')
+    if available is not None and available.lower() in ('true', '1', 'yes'):
+        records = records.filter(stock__gt=0)
+
     paginator = StandardResultsSetPagination()
     page = paginator.paginate_queryset(records, request)
     serializer = RecordListSerializer(page, many=True)
@@ -629,12 +640,23 @@ def record_search(request):
     if not query:
         return error_response("query parameter is required", status_code=400, code="query_required")
     
-    records = Record.objects.filter(Q(title__icontains=query) |
-                                    Q(artist__name__icontains=query) |
-                                    Q(genere__name__icontains=query) | 
-                                    Q(category__name__icontains=query))
-    
-    
+    records = Record.objects.filter(
+        Q(title__icontains=query) |
+        Q(artist__name__icontains=query) |
+        Q(genere__name__icontains=query) |
+        Q(category__name__icontains=query)
+    ).order_by('-id')
+
+    # ?category=lp,7,cd,... -> filter by category slug
+    category = request.query_params.get('category')
+    if category:
+        records = records.filter(category__slug=category)
+
+    # ?available=true -> only records with at least 1 item in stock
+    available = request.query_params.get('available')
+    if available is not None and available.lower() in ('true', '1', 'yes'):
+        records = records.filter(stock__gt=0)
+
     if not records.exists():
         return Response({"message": "No records found matching the query"}, status=404)
     serializer = RecordListSerializer(records, many=True)
