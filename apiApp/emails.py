@@ -142,22 +142,6 @@ def send_password_recovery_email(user, reset_link, expiry_hours=24):
     )
 
 
-def send_user_recovery_email(user, recovery_link, expiry_hours=24):
-    """Send the account-recovery email to a user."""
-    context = {
-        "user_name": user.first_name or user.username,
-        "username": user.username,
-        "recovery_link": recovery_link,
-        "expiry_hours": expiry_hours,
-        "frontend_url": settings.FRONTEND_URL,
-    }
-    send_email(
-        template_name="user_recovery",
-        context=context,
-        subject="Recuperación de cuenta — Moctezuma Records",
-        to=[user],
-    )
-
 
 def send_welcome_email(user):
     """Send the welcome email to a newly registered user."""
