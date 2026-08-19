@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.db import models
 from django.utils.text import slugify
@@ -11,6 +12,11 @@ def generate_cart_code():
 
 
 class User(AbstractUser):
+    ROLES = (
+        ('ADMIN', 'Admin'),
+        ('CUSTOMER', 'Customer'),
+    )
+
     username = models.CharField(max_length=150, unique=True)
     first_name = models.CharField(max_length=150, blank=True, null=True)
     last_name = models.CharField(max_length=150, blank=True, null=True)
@@ -18,6 +24,7 @@ class User(AbstractUser):
     adress = models.TextField(blank=True, null=True)
     profile_picture_url = models.ImageField(blank=True, null=True)
     email_verified = models.BooleanField(default=False)
+    role = models.CharField(max_length=10, choices=ROLES, default='CUSTOMER')
 
     def __str__(self):
         return self.username
@@ -32,10 +39,10 @@ class Category(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.title)
+            self.slug = slugify(self.name)
             unique_slug = self.slug
             counter = 1
-            if Record.objects.filter(slug=unique_slug).exists():
+            if Category.objects.filter(slug=unique_slug).exists():
                 unique_slug = f"{self.slug}-{counter}"
                 counter += 1
             self.slug = unique_slug
@@ -96,8 +103,12 @@ class Record(models.Model):
     genere = models.ForeignKey(Genere, on_delete=models.CASCADE, related_name='records', blank=True, null=True)
     cover_image_url = models.URLField(max_length=200, blank=True, null=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    sell_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    final_sale_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     discount_porcentage = models.PositiveBigIntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
     stock = models.PositiveIntegerField()
+    images = models.JSONField(default=list, blank=True)
     slug = models.SlugField(default="", blank=True, null=False)
     release_date = models.PositiveIntegerField(blank=True, null=True, default=2025)
     featured = models.BooleanField(default=True)
@@ -108,6 +119,11 @@ class Record(models.Model):
         return f"{self.title} by {self.artist}"
     
     def save(self, *args, **kwargs):
+        # Auto-calculate sell_price from price and discount_porcentage
+        price = Decimal(str(self.price)) if self.price is not None else Decimal('0')
+        discount = Decimal(str(self.discount_porcentage or 0))
+        self.sell_price = (price * (1 - discount / 100)).quantize(Decimal('0.01'))
+
         if not self.slug:
             self.slug = slugify(self.title)
             unique_slug = self.slug

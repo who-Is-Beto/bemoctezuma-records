@@ -48,9 +48,19 @@
                         <img src="{{ item.image_url }}" width="48" height="48" alt="{{ item.title }}" style="border-radius:6px;object-fit:cover;">
                         {% endif %}
                     </td>
-                    <td style="padding:8px 0;color:#0f3a5c;font-weight:600;">{{ item.title }}</td>
+                    <td style="padding:8px 0;color:#0f3a5c;font-weight:600;">
+                        {{ item.title }}
+                        {% if item.discount_pct %}
+                        <span style="display:inline-block;background:#fef0f0;color:#c0392b;font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;margin-left:6px;">-{{ item.discount_pct }}%</span>
+                        {% endif %}
+                    </td>
                     <td style="padding:8px 0;text-align:center;color:#0f3a5c;">{{ item.quantity }}</td>
-                    <td style="padding:8px 0;text-align:right;color:#0f3a5c;">{{ item.price_str }}</td>
+                    <td style="padding:8px 0;text-align:right;color:#0f3a5c;">
+                        {{ item.line_total_str }}
+                        {% if item.original_total_str %}
+                        <br/><span style="font-size:12px;color:#999;text-decoration:line-through;">{{ item.original_total_str }}</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% empty %}
                 <tr>

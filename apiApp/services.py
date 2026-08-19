@@ -11,15 +11,23 @@ def _order_email_context(order):
     shipped_label = "Enviado a domicilio" if order.shipped_to.lower() == "home" else order.shipped_to
     tracking = order.ship_link or "Preparando para envío"
     orders_link = f"{settings.FRONTEND_URL.rstrip('/')}/mis-ordenes"
-    items = [
-        {
-            "title": getattr(item.record, "title", "Artículo"),
+    items = []
+    for item in order.order_items.select_related("record"):
+        record = item.record
+        original_price = getattr(record, "price", item.price)
+        discount_pct = getattr(record, "discount_porcentage", 0) or 0
+        line_total = item.price * item.quantity
+        original_total = original_price * item.quantity
+        items.append({
+            "title": getattr(record, "title", "Artículo"),
             "quantity": item.quantity,
             "price_str": f"${item.price:.2f} {order.currency.upper()}",
-            "image_url": getattr(item.record, "cover_image_url", None),
-        }
-        for item in order.order_items.select_related("record")
-    ]
+            "image_url": getattr(record, "cover_image_url", None),
+            "original_price_str": f"${original_price:.2f} {order.currency.upper()}" if discount_pct > 0 else None,
+            "discount_pct": discount_pct if discount_pct > 0 else None,
+            "line_total_str": f"${line_total:.2f} {order.currency.upper()}",
+            "original_total_str": f"${original_total:.2f} {order.currency.upper()}" if discount_pct > 0 else None,
+        })
     return {
         "order_id": order.id,
         "amount_str": amount_str,

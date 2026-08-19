@@ -18,12 +18,15 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Artist, Cart, CartItem, Category, Order, OrderItem, Record, Review, Wishlist, WishlistItem
+from .models import Artist, Cart, CartItem, Category, Genere, Order, OrderItem, Record, Review, Wishlist, WishlistItem
 from .emails import send_password_recovery_email, send_verification_email, send_welcome_email
 from .services import send_order_created_email, send_order_notification_email
 from .pagination import StandardResultsSetPagination
 from .serilizers import (
+    AdminUserSerializer,
+    AdminUserUpdateSerializer,
     ArtistSerializer,
+    GenereSerializer,
     CartItemSerializer,
     CartSerializer,
     CategoryListSerializer,
@@ -31,14 +34,17 @@ from .serilizers import (
     OrderSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    RecordCreateSerializer,
     RecordDetailSerializer,
     RecordListSerializer,
+    RecordUpdateSerializer,
     ReviewSerializer,
     UserRegistrationSerializer,
     UserSerializer,
     VerifyEmailSerializer,
     WishlistSerializer,
 )
+import requests
 import stripe
 
 User = get_user_model()
@@ -82,8 +88,7 @@ def _require_email_verified(request):
 @api_view(['POST'])
 def register_user(request):
     serializer = UserRegistrationSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=400)
+    serializer.is_valid(raise_exception=True)
 
     user = serializer.save()
 
@@ -103,6 +108,7 @@ def register_user(request):
             "message": f"User {user.username} registered successfully",
             "tokens": tokens,
             "email_verified": user.email_verified,
+            "role": user.role,
         },
         status=201,
     )
@@ -128,11 +134,11 @@ def login_user(request):
             user_obj = User.objects.get(email=email)
             username = user_obj.username
         except User.DoesNotExist:
-            return error_response("Invalid credentials", status_code=401, code="invalid_credentials")
+            return error_response("Credenciales inválidas", status_code=401, code="invalid_credentials")
 
     user = authenticate(username=username, password=password)
     if not user:
-        return error_response("Invalid credentials", status_code=401, code="invalid_credentials")
+        return error_response("Credenciales inválidas", status_code=401, code="invalid_credentials")
     if not user.is_active:
         return error_response("User is inactive", status_code=403, code="user_inactive")
     if settings.REQUIRE_EMAIL_VERIFICATION and not user.email_verified:
@@ -148,6 +154,7 @@ def login_user(request):
             "message": "Login successful",
             "tokens": tokens,
             "email_verified": user.email_verified,
+            "role": user.role,
         },
         status=200,
     )
@@ -156,8 +163,7 @@ def login_user(request):
 @throttle_classes([ScopedRateThrottle])
 def request_password_reset(request):
     serializer = PasswordResetRequestSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=400)
+    serializer.is_valid(raise_exception=True)
 
     email = serializer.validated_data['email']
     try:
@@ -176,14 +182,13 @@ def request_password_reset(request):
 
     return Response({"message": "If that email is registered, a reset link has been sent"}, status=200)
 
-request_password_reset.view_class.throttle_scope = 'password_reset'
+request_password_reset.view_class.throttle_scope = 'password_reset_request'
 
 @api_view(['POST'])
 @throttle_classes([ScopedRateThrottle])
 def confirm_password_reset(request):
     serializer = PasswordResetConfirmSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=400)
+    serializer.is_valid(raise_exception=True)
 
     user = serializer.context['user']
     user.set_password(serializer.validated_data['new_password'])
@@ -191,13 +196,12 @@ def confirm_password_reset(request):
     logger.info("Password reset for user %s", user.id)
     return Response({"message": "Password reset successfully"}, status=200)
 
-confirm_password_reset.view_class.throttle_scope = 'password_reset'
+confirm_password_reset.view_class.throttle_scope = 'password_reset_confirm'
 
 @api_view(['POST'])
 def verify_email(request):
     serializer = VerifyEmailSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=400)
+    serializer.is_valid(raise_exception=True)
 
     user = serializer.context['user']
     if user.email_verified:
@@ -252,6 +256,112 @@ def get_user_details(_, username):
     serializer = UserSerializer(user)
     return Response(serializer.data)
 
+
+# ── Admin: user management ──────────────────────────────────────────────
+
+
+def _require_admin(request):
+    """Return an error Response if the user is not an admin, else None."""
+    if request.user.role != "ADMIN":
+        return error_response(
+            "No tienes permiso para realizar esta acción.",
+            status_code=403,
+            code="forbidden",
+        )
+    return None
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_list_users(request):
+    """List all users. Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    users = User.objects.all().order_by('-date_joined')
+    serializer = AdminUserSerializer(users, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def admin_update_user(request, user_id):
+    """Update a user (role, username, email, is_active, email_verified). Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    try:
+        target_user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return error_response("Usuario no encontrado", status_code=404, code="user_not_found")
+
+    serializer = AdminUserUpdateSerializer(target_user, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+
+    # Prevent admin from removing their own admin role
+    if target_user.id == request.user.id and 'role' in serializer.validated_data:
+        if serializer.validated_data['role'] != 'ADMIN':
+            return error_response(
+                "No puedes cambiar tu propio rol de administrador.",
+                status_code=400,
+                code="self_role_change_forbidden",
+            )
+
+    serializer.save()
+    return Response(AdminUserSerializer(target_user).data)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def admin_delete_user(request, user_id):
+    """Delete a user. Admin only. Cannot delete yourself."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    try:
+        target_user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        return error_response("Usuario no encontrado", status_code=404, code="user_not_found")
+
+    if target_user.id == request.user.id:
+        return error_response(
+            "No puedes eliminar tu propia cuenta desde aquí.",
+            status_code=400,
+            code="self_delete_forbidden",
+        )
+
+    target_user.delete()
+    return Response({"message": "Usuario eliminado correctamente"}, status=200)
+
+
+# ── Admin: record management ────────────────────────────────────────────
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def admin_update_record(request, record_id):
+    """Update a record (stock, final_sale_price, all fields). Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    try:
+        record = Record.objects.get(pk=record_id)
+    except Record.DoesNotExist:
+        return error_response("Disco no encontrado", status_code=404, code="record_not_found")
+
+    serializer = RecordUpdateSerializer(record, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+
+    # Return full detail so the frontend gets nested artist/category/genere
+    detail = RecordDetailSerializer(record)
+    return Response(detail.data)
+
+
 @api_view(['GET'])
 def record_list(request):
     records = Record.objects.filter(featured=True).order_by('-id')
@@ -271,6 +381,20 @@ def record_list(request):
     serializer = RecordListSerializer(page, many=True)
     return paginator.get_paginated_response(serializer.data)
 
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def record_create(request):
+    """Create a new record. Admin only."""
+    if request.user.role != "ADMIN":
+        return error_response("No tienes permiso para realizar esta acción.", status_code=403, code="forbidden")
+    serializer = RecordCreateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    record = serializer.save()
+    # Return the full detail so the frontend gets nested artist/category/genere
+    detail = RecordDetailSerializer(record)
+    return Response(detail.data, status=201)
+
 @api_view(['GET'])
 def artist_list(request):
     artists = Artist.objects.all().order_by('name')
@@ -278,6 +402,41 @@ def artist_list(request):
     page = paginator.paginate_queryset(artists, request)
     serializer = ArtistSerializer(page, many=True)
     return paginator.get_paginated_response(serializer.data)
+@api_view(['GET'])
+def artist_search(request):
+    """Search artists by name. Used for autocomplete."""
+    q = request.query_params.get('q', '').strip()
+    if not q:
+        return Response([])
+    artists = Artist.objects.filter(name__icontains=q).order_by('name')[:20]
+    serializer = ArtistSerializer(artists, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def artist_create(request):
+    """Create a new artist. Returns existing if name matches exactly."""
+    name = request.data.get('name', '').strip()
+    if not name:
+        return error_response("name is required", status_code=400, code="name_required")
+    
+    # Case-insensitive exact match
+    existing = Artist.objects.filter(name__iexact=name).first()
+    if existing:
+        serializer = ArtistSerializer(existing)
+        return Response(serializer.data, status=200)
+    
+    artist = Artist.objects.create(name=name)
+    serializer = ArtistSerializer(artist)
+    return Response(serializer.data, status=201)
+
+
+@api_view(['GET'])
+def genere_list(request):
+    generes = Genere.objects.all().order_by('name')
+    serializer = GenereSerializer(generes, many=True)
+    return Response(serializer.data)
 
 @api_view(['GET'])
 def record_detail(_, slug):
@@ -718,7 +877,7 @@ def create_stripe_checkout_session(request):
                             'record_id': str(item.record.id),
                         },
                     },
-                    'unit_amount': int(item.record.price * 100),
+                    'unit_amount': int(item.record.sell_price * 100),
                 },
                 'quantity': item.quantity,
             })
@@ -777,7 +936,7 @@ def _resolve_cart_code_from_session(session):
     for cart in carts:
         cents = 0
         for item in cart.cart_items.all():
-            cents += int(item.record.price * 100) * int(item.quantity)
+            cents += int(item.record.sell_price * 100) * int(item.quantity)
         if amount_total is not None and cents == amount_total:
             candidates.append(cart.cart_code)
 
@@ -859,7 +1018,7 @@ def fulfill_checkout(session, cart_code=None):
                     order=order,
                     record=item.record,
                     quantity=item.quantity,
-                    price=item.record.price,
+                    price=item.record.sell_price,
                 )
 
         # Decrement stock per item, atomically and never below zero.
@@ -887,6 +1046,250 @@ def fulfill_checkout(session, cart_code=None):
         send_order_notification_email(order)
     except Exception as exc:
         logger.warning("Order created but seller notification failed for %s: %s", order.id, exc)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def discogs_search(request):
+    """Proxy Discogs database search for releases."""
+    query = request.query_params.get('q', '').strip()
+    if not query:
+        return error_response("q parameter is required", status_code=400, code="query_required")
+
+    page = request.query_params.get('page', 1)
+    per_page = request.query_params.get('per_page', 25)
+
+    discogs_token = getattr(settings, 'DISCOGS_TOKEN', '')
+    headers = {
+        'User-Agent': 'MoctezumaRecords/1.0 +https://moctezumarecords.com',
+    }
+    if discogs_token:
+        headers['Authorization'] = f'Discogs token={discogs_token}'
+
+    try:
+        resp = requests.get(
+            'https://api.discogs.com/database/search',
+            params={
+                'q': query,
+                'type': 'release',
+                'page': page,
+                'per_page': per_page,
+            },
+            headers=headers,
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("Discogs search failed: %s", exc)
+        return error_response("Error contacting Discogs", status_code=502, code="discogs_error")
+
+    data = resp.json()
+    results = []
+    for item in data.get('results', []):
+        raw_title = item.get('title', '')
+        artist_name = ''
+        record_title = raw_title
+        if ' - ' in raw_title:
+            artist_name, record_title = raw_title.split(' - ', 1)
+
+        genres = item.get('genre', []) or []
+        styles = item.get('style', []) or []
+        genre_str = ', '.join(genres + styles) if genres or styles else ''
+
+        formats = item.get('format', []) or []
+        format_str = ', '.join(formats) if formats else ''
+
+        # Use smaller thumbnail for search results (faster loading)
+        thumb = item.get('thumb', '') or item.get('cover_image', '')
+        
+        results.append({
+            'discogs_id': item.get('id'),
+            'title': record_title,
+            'artist': artist_name,
+            'year': item.get('year'),
+            'cover_image': thumb,
+            'genre': genre_str,
+            'style': ', '.join(item.get('style', []) or []),
+            'format': format_str,
+            'formats': item.get('format', []),
+            'resource_url': item.get('resource_url', ''),
+            'uri': item.get('uri', ''),
+        })
+
+    return Response({
+        'results': results,
+        'pagination': data.get('pagination', {}),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def discogs_release_detail(request, release_id):
+    """Fetch full release details from Discogs.
+
+    Combines the master release tracklist with version-specific notes,
+    images, labels, and country info.
+    """
+    discogs_token = getattr(settings, 'DISCOGS_TOKEN', '')
+    headers = {
+        'User-Agent': 'MoctezumaRecords/1.0 +https://moctezumarecords.com',
+    }
+    if discogs_token:
+        headers['Authorization'] = f'Discogs token={discogs_token}'
+
+    # 1. Fetch the specific release (version)
+    try:
+        resp = requests.get(
+            f'https://api.discogs.com/releases/{release_id}',
+            headers=headers,
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("Discogs release detail failed: %s", exc)
+        return error_response("Error contacting Discogs", status_code=502, code="discogs_error")
+
+    release = resp.json()
+
+    # 2. Try to fetch the master release for the canonical tracklist
+    master_tracklist = []
+    master_year = None
+    master_id = release.get('master_id')
+    if master_id:
+        try:
+            master_resp = requests.get(
+                f'https://api.discogs.com/masters/{master_id}',
+                headers=headers,
+                timeout=10,
+            )
+            if master_resp.ok:
+                master = master_resp.json()
+                master_tracklist = master.get('tracklist', [])
+                master_year = master.get('year')
+        except requests.RequestException:
+            pass  # Fall back to release-level tracklist
+
+    # 3. Build the tracklist: prefer master, fallback to release
+    tracklist_source = master_tracklist or release.get('tracklist', [])
+    tracklist = []
+    for t in tracklist_source:
+        pos = t.get('position', '')
+        title = t.get('title', '')
+        duration = t.get('duration', '')
+        parts = [f"{pos} - {title}" if pos else title]
+        if duration:
+            parts.append(f"({duration})")
+        tracklist.append(' '.join(parts))
+
+    # 4. Build description: combine tracklist with version-specific notes
+    notes = (release.get('notes', '') or '').strip()
+    description_parts = []
+    if tracklist:
+        description_parts.append("Contenido (_lista de canciones_):")
+        for t in tracklist:
+            description_parts.append(f"  {t}")
+    if notes:
+        description_parts.append("")
+        description_parts.append(f"Notas de la versión: {notes}")
+    description = '\n'.join(description_parts) if description_parts else ''
+
+    # 5. Extract all images from the release
+    images = [img.get('uri', '') for img in release.get('images', [])]
+
+    # 6. Also get master images if we have them and release has none
+    if not images and master_id:
+        try:
+            if master_resp and master_resp.ok:
+                master_images = master.get('images', [])
+                images = [img.get('uri', '') for img in master_images]
+        except Exception:
+            pass
+
+    # Extract format details with descriptions for category matching
+    format_details = []
+    for fmt in release.get('formats', []):
+        entry = {'name': fmt.get('name', ''), 'descriptions': fmt.get('descriptions', [])}
+        format_details.append(entry)
+
+    return Response({
+        'discogs_id': release.get('id'),
+        'title': release.get('title', ''),
+        'description': description,
+        'images': images,
+        'tracklist': tracklist,
+        'year': release.get('year') or master_year,
+        'genres': release.get('genres', []),
+        'styles': release.get('styles', []),
+        'formats': [f.get('name', '') for f in release.get('formats', [])],
+        'format_details': format_details,
+        'country': release.get('country', ''),
+        'labels': [l.get('name', '') for l in release.get('labels', [])],
+        'master_id': master_id,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def complete_checkout_session(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
+    session_id = (request.data.get('session_id') or '').strip()
+
+    if not session_id:
+        return error_response("session_id is required", status_code=400, code="missing_session_id")
+
+    if Order.objects.filter(stripe_checkout_session_id=session_id).exists():
+        return Response({"message": "Order already created for this session"}, status=200)
+
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+        cart_code = _resolve_cart_code_from_session(session)
+        fulfill_checkout(session, cart_code)
+        return Response({"message": "Order created successfully"}, status=200)
+    except Exception as e:
+        return error_response(str(e), status_code=500, code="checkout_complete_error")
+
+@api_view(['GET'])
+def checkout_success(request):
+    session_id = request.query_params.get('session_id', '').strip()
+
+    if not session_id:
+        return error_response("session_id is required", status_code=400, code="missing_session_id")
+
+    order = Order.objects.filter(stripe_checkout_session_id=session_id).first()
+
+    if order:
+        return Response({"message": "Payment confirmed ✅ / order created", "status": order.status}, status=200)
+
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+        if session.get("payment_status") == "paid":
+            cart_code = _resolve_cart_code_from_session(session)
+            fulfill_checkout(session, cart_code)
+            order = Order.objects.filter(stripe_checkout_session_id=session_id).first()
+            if order:
+                return Response({"message": "Payment confirmed ✅ / order created", "status": order.status}, status=200)
+    except Exception as exc:
+        logger.warning("checkout_success fallback failed for session %s: %s", session_id, exc)
+
+    return Response({"message": "We’re still confirming your payment… refresh in a moment", "status": "pending"}, status=200)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_orders(request):
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
+    email = getattr(request.user, 'email', None)
+
+    if not email:
+        return error_response("User email not found", status_code=400, code="user_email_missing")
+
+    orders = Order.objects.filter(user_email=email).order_by('-created_at').prefetch_related('order_items__record')
+    serializer = OrderSerializer(orders, many=True)
+    return Response(serializer.data, status=200)
+
+
 @csrf_exempt
 def stripe_webhook(request):
     payload = request.body

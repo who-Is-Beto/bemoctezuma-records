@@ -64,13 +64,59 @@ class RecordListSerializer(serializers.ModelSerializer):
     genere = GenereSerializer(read_only=True)
     class Meta:
         model = Record
-        fields = ['id', 'title', 'condition', 'category', 'artist', 'genere', 'cover_image_url', 'price', 'discount_porcentage', 'stock', 'slug', 'category']
+        fields = ['id', 'title', 'condition', 'category', 'artist', 'genere', 'cover_image_url', 'price', 'cost_price', 'sell_price', 'final_sale_price', 'discount_porcentage', 'stock', 'slug', 'images']
 
 
-class  UserSerializer(serializers.ModelSerializer):
+
+class RecordCreateSerializer(serializers.ModelSerializer):
+    """Write-only serializer for creating a record via the admin inventory form.
+
+    FKs are accepted as plain IDs (not nested objects).
+    sell_price is auto-calculated from price + discount_porcentage in Record.save().
+    """
+
+    class Meta:
+        model = Record
+        fields = [
+            'title', 'artist', 'description', 'condition', 'genere',
+            'cover_image_url', 'price', 'cost_price', 'sell_price',
+            'discount_porcentage', 'stock', 'images', 'release_date',
+            'featured', 'items_inside', 'category',
+        ]
+        extra_kwargs = {
+            'price': {'required': True},
+            'sell_price': {'read_only': True},
+        }
+
+    def create(self, validated_data):
+        """sell_price is auto-calculated in Record.save() from price + discount."""
+        return super().create(validated_data)
+
+    def validate_price(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("El precio debe ser mayor a 0.")
+        return value
+
+    def validate_sell_price(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("El precio de venta debe ser mayor a 0.")
+        return value
+
+    def validate_stock(self, value):
+        if value < 0:
+            raise serializers.ValidationError("El stock no puede ser negativo.")
+        return value
+
+    def validate_cost_price(self, value):
+        if value < 0:
+            raise serializers.ValidationError("El precio de costo no puede ser negativo.")
+        return value
+
+
+class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = get_user_model()
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'email_verified']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'email_verified', 'role']
 
 class CartItemSerializer(serializers.ModelSerializer):
     record = RecordListSerializer(read_only=True)
@@ -80,7 +126,7 @@ class CartItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'record', 'quantity', 'subtotal']
 
     def get_subtotal(self, cart_item):
-        return cart_item.quantity * cart_item.record.price
+        return cart_item.quantity * cart_item.record.sell_price
     
 class CartSerializer(serializers.ModelSerializer):
     cart_items = CartItemSerializer(many=True, read_only=True)
@@ -90,7 +136,7 @@ class CartSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'cart_code', 'created_at', 'updated_at', 'cart_items', 'total_price']
 
     def get_total_price(self, cart):
-        total = sum(item.quantity * item.record.price for item in cart.cart_items.all())
+        total = sum(item.quantity * item.record.sell_price for item in cart.cart_items.all())
         return total
 
 class CartStatSerializer(serializers.ModelSerializer):
@@ -150,6 +196,49 @@ class OrderSerializer(serializers.ModelSerializer):
             'updated_at',
             'order_items',
         ]
+
+class AdminUserSerializer(serializers.ModelSerializer):
+    """Read-only serializer for admin user list."""
+    class Meta:
+        model = get_user_model()
+        fields = ['id', 'username', 'email', 'role', 'is_active', 'email_verified', 'date_joined']
+
+
+class AdminUserUpdateSerializer(serializers.ModelSerializer):
+    """Writable serializer for admin user updates (PATCH)."""
+    class Meta:
+        model = get_user_model()
+        fields = ['username', 'email', 'role', 'is_active', 'email_verified']
+
+    def validate_role(self, value):
+        valid_roles = [r[0] for r in get_user_model().ROLES]
+        if value not in valid_roles:
+            raise serializers.ValidationError(f"Rol inválido. Opciones: {', '.join(valid_roles)}")
+        return value
+
+
+class RecordUpdateSerializer(serializers.ModelSerializer):
+    """Writable serializer for admin record updates (PATCH).
+
+    FKs are accepted as plain IDs (not nested objects).
+    All fields optional since this is used for partial updates.
+    sell_price is auto-calculated from price + discount_porcentage in Record.save().
+    """
+    class Meta:
+        model = Record
+        fields = [
+            'title', 'artist', 'description', 'condition', 'genere',
+            'cover_image_url', 'price', 'cost_price', 'sell_price',
+            'final_sale_price', 'discount_porcentage', 'stock', 'images',
+            'release_date', 'featured', 'items_inside', 'category',
+        ]
+        extra_kwargs = {
+            field: {'required': False}
+            for field in fields
+        } | {
+            'sell_price': {'read_only': True},
+        }
+
 
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
