@@ -3,7 +3,11 @@ from . import views
 
 urlpatterns = [
     path('records/', views.record_list, name='records-list'),
+    path('records/create/', views.record_create, name='records-create'),
     path('artists/', views.artist_list, name='artist-list'),
+    path('artists/search/', views.artist_search, name='artist-search'),
+    path('artists/create/', views.artist_create, name='artist-create'),
+    path('generes/', views.genere_list, name='genere-list'),
     path('records/<slug:slug>/', views.record_detail, name='product-detail'),
     path('categories/', views.get_category_list, name='category-list'),
     path('categories/<slug:slug>/', views.get_category_detail, name='category-detail'),
@@ -26,6 +30,8 @@ urlpatterns = [
     path('reviews/', views.get_all_reviews, name='get-all-reviews'),
     path('reviews/record/<int:record_id>/', views.get_record_reviews, name='get-record-reviews'),
     path('search/', views.record_search, name='record-search'),
+    path('discogs/search/', views.discogs_search, name='discogs-search'),
+    path('discogs/releases/<int:release_id>/', views.discogs_release_detail, name='discogs-release-detail'),
     path('create-checkout-session/', views.create_stripe_checkout_session, name='create-checkout-session'),
     path('checkout/complete/', views.complete_checkout_session, name='complete-checkout-session'),
     path('checkout/success/', views.checkout_success, name='checkout-success'),
@@ -35,8 +41,12 @@ urlpatterns = [
     path('auth/verify-email/', views.verify_email, name='verify-email'),
     path('auth/verify-email/resend/', views.resend_verification_email, name='resend-verification-email'),
     path('auth/me/', views.get_me, name='auth-me'),
+    path('auth/users/', views.admin_list_users, name='admin-list-users'),
+    path('auth/users/<int:user_id>/', views.admin_update_user, name='admin-update-user'),
+    path('auth/users/<int:user_id>/delete/', views.admin_delete_user, name='admin-delete-user'),
     path('auth/password-reset/', views.request_password_reset, name='password-reset-request'),
     path('auth/password-reset/confirm/', views.confirm_password_reset, name='password-reset-confirm'),
+    path('records/<int:record_id>/update/', views.admin_update_record, name='admin-update-record'),
     path('user/<str:username>/', views.get_user_details, name='get-user-details'),
     path('stripe-webhook/', views.stripe_webhook, name='stripe-webhook'),
 ]

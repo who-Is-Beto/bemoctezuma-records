@@ -95,6 +95,34 @@ Si quieres acceder al panel de adminostrador en desarrollo.
   python manage.py createsuperuser
 ```
 
+### Asignar rol de admin (desarrollo)
+
+En el shell de Django:
+
+```bash
+python manage.py shell -c "
+from apiApp.models import User
+u = User.objects.get(username='tu_usuario')
+u.role = 'ADMIN'
+u.save()
+print(f'{u.username} ahora es ADMIN')
+"
+```
+
+### Asignar rol de admin (producción en Railway)
+
+```bash
+railway run python manage.py shell -c "
+from apiApp.models import User
+u = User.objects.get(email='tu@email.com')
+u.role = 'ADMIN'
+u.save()
+print(f'{u.username} ahora es ADMIN')
+"
+```
+
+Alternativamente, puedes acceder a `/admin/` en Railway (crea un superuser primero si no tienes uno con `railway run python manage.py createsuperuser`), buscar el usuario, y cambiar el campo **Role** directamente desde el panel de Django admin.
+
 ## Verificación de email ✉️ (2FA por email)
 
 Al registrarse, el backend envía un correo con un enlace de verificación firmado (expira a las 24 h). Si `REQUIRE_EMAIL_VERIFICATION=true`, el usuario **no puede hacer login** hasta confirmar su correo.
@@ -149,3 +177,29 @@ python -m pytest apiApp/tests/ -q
 ```
 
 Incluyen cobertura de la verificación en `apiApp/tests/test_emails.py` (token forjado, uid inválido, idempotencia, reenvío, throttle 429 y login bloqueado/permitido) y del gate de compra en `apiApp/tests/test_verification_gate.py` (carrito, checkout y órdenes bloqueados cuando el usuario no está verificado).
+
+## Panel de admin / Inventario 🛠️
+
+El frontend incluye un panel de administración (`/admin`) con tres pestañas:
+
+- **Agregar disco**: crear/editar registros con vista previa en vivo, búsqueda por Discogs, cálculo de precio de venta y ganancia.
+- **Discos**: lista paginada con búsqueda, modal de venta (descuenta stock + registra `final_sale_price`), botón Editar.
+- **Usuarios**: listar, cambiar rol (ADMIN/CUSTOMER), eliminar.
+
+### Endpoints admin (requieren `role=ADMIN`)
+
+| Método | URL | Descripción |
+|--------|-----|-------------|
+| `GET` | `/auth/users/` | Lista de todos los usuarios. |
+| `PATCH` | `/auth/users/<id>/` | Actualizar rol/estado de un usuario. |
+| `DELETE` | `/auth/users/<id>/delete/` | Eliminar usuario. |
+| `PATCH` | `/records/<id>/update/` | Actualizar stock, precio, descuento, etc. |
+| `POST` | `/artists/create/` | Crear artista (retorna existente si el nombre coincide). |
+| `POST` | `/generes/create/` | Crear género (retorna existente si el nombre coincide). |
+
+### Sistema de precios con descuento
+
+- `Record.price` = precio de lista (nunca cambia).
+- `Record.discount_porcentage` = porcentaje de descuento.
+- `Record.sell_price` = auto-calculado en `Record.save()` con `Decimal` precision: `price × (1 − discount%/100)`.
+- El frontend calcula precios con `getEffectivePrice(record)` en `album.ts` — resuelve desde `price` + `discount_porcentage` directamente para no depender de un `sell_price` potencialmente stale.

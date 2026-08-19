@@ -91,9 +91,11 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'password_reset': '5/hour',
-        'email_verify': '5/hour',
+        'password_reset_request': '10/hour',
+        'password_reset_confirm': '30/hour',
+        'email_verify': '10/hour',
     },
+    'EXCEPTION_HANDLER': 'apiApp.exception_handler.normalized_exception_handler',
 }
 
 # JWT lifetimes (long-lived access/refresh tokens)
@@ -221,6 +223,8 @@ FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 
 # Email verification: set to True to block login until the email is verified.
 REQUIRE_EMAIL_VERIFICATION = os.getenv('REQUIRE_EMAIL_VERIFICATION', 'False').lower() == 'true'
+
+DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
 
 # Who gets a notification when a customer places an order (comma-separated env).
 SELLER_NOTIFY_EMAILS = [
