@@ -81,7 +81,7 @@ class RecordCreateSerializer(serializers.ModelSerializer):
             'title', 'artist', 'description', 'condition', 'genere',
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'discount_porcentage', 'stock', 'images', 'release_date',
-            'featured', 'items_inside', 'category',
+            'featured', 'items_inside', 'weight_grams', 'category',
         ]
         extra_kwargs = {
             'price': {'required': True},
@@ -190,7 +190,10 @@ class OrderSerializer(serializers.ModelSerializer):
             'user_email',
             'shipped_to',
             'shipping_details',
-            'ship_link',
+            'shipping_cost',
+            'shipping_courier',
+            'shipping_service',
+            'shipping_link',
             'status',
             'created_at',
             'updated_at',
@@ -230,7 +233,7 @@ class RecordUpdateSerializer(serializers.ModelSerializer):
             'title', 'artist', 'description', 'condition', 'genere',
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'final_sale_price', 'discount_porcentage', 'stock', 'images',
-            'release_date', 'featured', 'items_inside', 'category',
+            'release_date', 'featured', 'items_inside', 'weight_grams', 'category',
         ]
         extra_kwargs = {
             field: {'required': False}

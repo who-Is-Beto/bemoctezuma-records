@@ -1,0 +1,45 @@
+{% extends "emails/base.html" %}
+
+{% block preheader %}Tu pedido #{{ order_id }} va en camino{% endblock %}
+
+{% block content %}
+<div>
+    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Orden #{{ order_id }}</div>
+    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">¡Tu pedido va en camino! 📦</div>
+    <div style="color:#4f5b67;font-size:14px;margin-bottom:12px;">Buenas noticias: preparamos y enviamos tu pedido. Aquí están los detalles:</div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f7fa;border-radius:12px;">
+        <tr>
+            <td style="padding:14px 16px;color:#0f3a5c;">
+                <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;">Paquetería</div>
+                <div style="font-size:14px;font-weight:600;">{{ courier_service }}</div>
+            </td>
+            <td style="padding:14px 16px;text-align:right;color:#0f3a5c;">
+                <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;">Rastreo</div>
+                {% if shipping_link %}
+                <a href="{{ shipping_link }}" style="font-size:13px;font-weight:700;color:#f08c2c;word-break:break-all;">Rastrear mi paquete</a>
+                {% else %}
+                <div style="font-size:13px;font-weight:600;">{{ tracking }}</div>
+                {% endif %}
+            </td>
+        </tr>
+    </table>
+
+    {% if shipping %}
+    <div style="margin-top:12px;padding:12px;border-radius:12px;background:#fef4e8;">
+        <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Se envía a</div>
+        <div style="color:#0f3a5c;line-height:1.5;">
+            {{ shipping.fullName }}<br/>
+            {{ shipping.street }} {{ shipping.number }}<br/>
+            {{ shipping.neighborhood }}, {{ shipping.city }}<br/>
+            {{ shipping.state }} {{ shipping.zip }}
+        </div>
+    </div>
+    {% endif %}
+
+    <div style="text-align:center;margin:24px 0 8px;">
+        <a href="{{ orders_link }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f3a5c;color:#ffffff;text-decoration:none;font-weight:700;">Ver mis órdenes</a>
+    </div>
+    <div style="text-align:center;color:#4f5b67;font-size:12px;">Si tienes alguna duda sobre tu envío, responde a este correo.</div>
+</div>
+{% endblock %}

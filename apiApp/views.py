@@ -1,16 +1,21 @@
 import json
 import logging
+import operator
+import re
 from decimal import Decimal
+from functools import reduce
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import F, Q, Value
+from django.db.models.functions import Replace
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
+from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated
@@ -20,7 +25,21 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Artist, Cart, CartItem, Category, Genere, Order, OrderItem, Record, Review, Wishlist, WishlistItem
 from .emails import send_password_recovery_email, send_verification_email, send_welcome_email
-from .services import send_order_created_email, send_order_notification_email
+from .services import (
+    CD_UNIT_WEIGHT_GRAMS,
+    DEFAULT_UNIT_WEIGHT_GRAMS,
+    PREFERRED_COURIER,
+    SEVEN_INCH_UNIT_WEIGHT_GRAMS,
+    ShippingQuoteError,
+    build_package_from_cart,
+    get_shipping_quotes,
+    get_zip_locations,
+    normalize_zip_code,
+    select_cheapest_quote,
+    send_order_created_email,
+    send_order_shipped_email,
+    send_order_notification_email,
+)
 from .pagination import StandardResultsSetPagination
 from .serilizers import (
     AdminUserSerializer,
@@ -362,6 +381,34 @@ def admin_update_record(request, record_id):
     return Response(detail.data)
 
 
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def admin_delete_record(request, record_id):
+    """
+    Permanently delete a record. Admin only.
+
+    Order history is preserved: OrderItem.record is SET_NULL, so past orders
+    keep their quantity and snapshotted price. Cart items, wishlist entries,
+    reviews and the rating summary are removed with the record (CASCADE).
+    The cover image file on disk is intentionally left in place.
+    """
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    try:
+        record = Record.objects.get(pk=record_id)
+    except Record.DoesNotExist:
+        return error_response("Disco no encontrado", status_code=404, code="record_not_found")
+
+    title = record.title
+    record.delete()
+    return Response(
+        {"message": f"Disco '{title}' eliminado permanentemente"},
+        status=200,
+    )
+
+
 @api_view(['GET'])
 def record_list(request):
     records = Record.objects.filter(featured=True).order_by('-id')
@@ -404,11 +451,25 @@ def artist_list(request):
     return paginator.get_paginated_response(serializer.data)
 @api_view(['GET'])
 def artist_search(request):
-    """Search artists by name. Used for autocomplete."""
+    """Search artists by name. Used for autocomplete.
+
+    Accent/punctuation-insensitive: 'zoe' finds 'Zoé', 'trex' finds 'T. Rex'.
+    """
     q = request.query_params.get('q', '').strip()
     if not q:
         return Response([])
-    artists = Artist.objects.filter(name__icontains=q).order_by('name')[:20]
+    tokens = _query_tokens(q)
+    if tokens:
+        # Every word must match the artist's normalized slug, in any order.
+        # Q objects (not queryset &) avoid duplicate-annotation collisions.
+        artists = Artist.objects.filter(
+            reduce(
+                operator.and_,
+                (Q(id__in=_slug_contains(Artist, t)) for t in tokens),
+            )
+        ).order_by('name')[:20]
+    else:
+        artists = Artist.objects.filter(name__icontains=q).order_by('name')[:20]
     serializer = ArtistSerializer(artists, many=True)
     return Response(serializer.data)
 
@@ -466,6 +527,67 @@ def get_category_detail(_, slug):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def admin_list_orders(request):
+    """List every order (newest first). Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    orders = Order.objects.all().order_by('-created_at').prefetch_related('order_items__record')
+    serializer = OrderSerializer(orders, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def admin_update_order(request, order_id):
+    """Update an order's status and/or shipping_link. Admin only.
+
+    status must be one of Order.status_choices; shipping_link is a tracking
+    URL/code (max 255 chars, empty string clears it).
+    """
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    order = get_object_or_404(Order, pk=order_id)
+
+    previous_status = order.status
+    valid_statuses = dict(Order.status_choices)
+    if 'status' in request.data:
+        new_status = request.data.get('status')
+        if new_status not in valid_statuses:
+            return error_response(
+                f"status debe ser uno de: {', '.join(valid_statuses)}.",
+                status_code=400,
+                code="invalid_status",
+            )
+        order.status = new_status
+
+    if 'shipping_link' in request.data:
+        new_link = str(request.data.get('shipping_link') or '').strip()
+        if len(new_link) > 255:
+            return error_response(
+                "shipping_link no puede exceder 255 caracteres.",
+                status_code=400,
+                code="invalid_shipping_link",
+            )
+        order.shipping_link = new_link
+
+    order.save()
+
+    # First time an order moves into 'shipped', tell the customer their
+    # package is on the way (includes the tracking link saved in this same
+    # request, if any). Link-only edits on already-shipped orders don't re-send.
+    if order.status == 'shipped' and previous_status != 'shipped':
+        send_order_shipped_email(order)
+
+    serializer = OrderSerializer(order)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_cart(request, cart_code):
     blocked = _require_email_verified(request)
     if blocked:
@@ -474,7 +596,7 @@ def get_cart(request, cart_code):
         cart = Cart.objects.get(cart_code=cart_code)
     except Cart.DoesNotExist:
         return error_response("Cart not found", status_code=404, code="cart_not_found")
-    
+
     serializer = CartSerializer(cart)
     return Response(serializer.data)
 
@@ -793,18 +915,63 @@ def get_all_reviews(request):
     serializer = ReviewSerializer(page, many=True)
     return paginator.get_paginated_response(serializer.data)
 
+def _normalized_search_term(term):
+    """Normalize a search term the same way slugs are generated.
+
+    'Zoé' -> 'zoe', 'T. Rex' -> 'trex' — lets 'zoe' match records by 'Zoé'
+    and 'trex' match 'T. Rex' by comparing against hyphen-stripped slugs.
+    """
+    return slugify(term or '').replace('-', '')
+
+
+def _slug_contains(model, term):
+    """Queryset of `model` whose slug, with hyphens stripped, contains term."""
+    return model.objects.annotate(
+        _norm_slug=Replace('slug', Value('-'), Value('')),
+    ).filter(_norm_slug__icontains=term)
+
+
+def _query_tokens(query):
+    """Split a raw query into normalized, comparable tokens.
+
+    'Pink  Floyd!' -> ['pink', 'floyd']; 'Zoé' -> ['zoe'].
+    """
+    tokens = (_normalized_search_term(word) for word in query.split())
+    return [tok for tok in tokens if tok]
+
+
+def _record_token_q(token):
+    """Q matching one token against any searchable field's normalized slug."""
+    return (
+        Q(id__in=_slug_contains(Record, token))
+        | Q(artist__in=_slug_contains(Artist, token))
+        | Q(genere__in=_slug_contains(Genere, token))
+        | Q(category__in=_slug_contains(Category, token))
+    )
+
+
 @api_view(['GET'])
 def record_search(request):
     query = request.query_params.get('query')
     if not query:
         return error_response("query parameter is required", status_code=400, code="query_required")
-    
-    records = Record.objects.filter(
-        Q(title__icontains=query) |
-        Q(artist__name__icontains=query) |
-        Q(genere__name__icontains=query) |
-        Q(category__name__icontains=query)
-    ).order_by('-id')
+
+    tokens = _query_tokens(query)
+    if tokens:
+        # Every word must match somewhere (title/artist/genre/category),
+        # in any order — 'floyd dark side' finds Pink Floyd's Dark Side.
+        combined_q = Q()
+        for token in tokens:
+            combined_q &= _record_token_q(token)
+        records = Record.objects.filter(combined_q).order_by('-id')
+    else:
+        # Term was pure punctuation; fall back to the legacy substring match.
+        records = Record.objects.filter(
+            Q(title__icontains=query)
+            | Q(artist__name__icontains=query)
+            | Q(genere__name__icontains=query)
+            | Q(category__name__icontains=query)
+        ).order_by('-id')
 
     # ?category=lp,7,cd,... -> filter by category slug
     category = request.query_params.get('category')
@@ -824,6 +991,97 @@ def record_search(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def shipping_quote(request):
+    """Quote home-delivery cost for a cart via Envíos Perros.
+
+    Body: {"cart_code": "...", "zip": "15400"}
+    Returns the cheapest Estafeta option (store policy) plus the full quote
+    list so the frontend can display alternatives later if needed.
+    """
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
+
+    cart_code = request.data.get('cart_code')
+    zip_code = normalize_zip_code(request.data.get('zip'))
+    if not zip_code:
+        return error_response(
+            "zip debe ser un código postal válido de 5 dígitos.",
+            status_code=400,
+            code="invalid_zip_code",
+        )
+
+    cart = Cart.objects.filter(cart_code=cart_code).prefetch_related('cart_items__record__category').first()
+    if not cart or cart.cart_items.count() == 0:
+        return error_response("Cart is empty or not found", status_code=400, code="cart_empty")
+
+    package = build_package_from_cart(cart)
+    try:
+        quotes = get_shipping_quotes(zip_code, package)
+    except ShippingQuoteError as exc:
+        return error_response(exc.message, status_code=502, code=exc.code)
+
+    selected = select_cheapest_quote(quotes)
+    if selected is None:
+        return error_response(
+            f"No hay opciones de envío con {PREFERRED_COURIER} para el código postal {zip_code}.",
+            status_code=404,
+            code="shipping_unavailable",
+        )
+
+    subtotal = sum(
+        (item.record.sell_price * item.quantity for item in cart.cart_items.all()),
+        Decimal('0'),
+    )
+    return Response({
+        'zip_code': zip_code,
+        'package': package,
+        'subtotal': subtotal,
+        'currency': selected.get('currency', 'MXN'),
+        'selected': {
+            'title': selected.get('title'),
+            'total': selected.get('total'),
+            'currency': selected.get('currency', 'MXN'),
+            'courier': selected.get('courier'),
+            'serviceType': selected.get('serviceType'),
+            'deliveryCommitment': selected.get('deliveryCommitment'),
+        },
+        'quotes': quotes,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def shipping_locations(request):
+    """List the Sepomex colonias for a ZIP code (Envíos Perros /locations).
+
+    One ZIP can cover several colonias and label generation requires the exact
+    Sepomex name, so the checkout address form offers these as a dropdown.
+    Query: ?zip=06700 (4-5 digits, per the upstream autocomplete contract).
+    """
+    blocked = _require_email_verified(request)
+    if blocked:
+        return blocked
+
+    raw = (request.query_params.get('zip') or '').strip()
+    if not re.fullmatch(r'\d{4,5}', raw):
+        return error_response(
+            "zip debe tener 4 o 5 dígitos.",
+            status_code=400,
+            code="invalid_zip_code",
+        )
+    zip_code = normalize_zip_code(raw) if len(raw) == 5 else raw
+
+    try:
+        locations = get_zip_locations(zip_code)
+    except ShippingQuoteError as exc:
+        return error_response(exc.message, status_code=502, code=exc.code)
+
+    return Response({'zip': zip_code, 'locations': locations})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def create_stripe_checkout_session(request):
     blocked = _require_email_verified(request)
     if blocked:
@@ -832,6 +1090,7 @@ def create_stripe_checkout_session(request):
     email = getattr(request.user, 'email', None)
     shipped_to = request.data.get('shipped_to')
     shipping_details = request.data.get('shippingDetails') or request.data.get('shipping_details')
+    zip_code = None
 
     if not shipped_to:
         return error_response("shipped_to is required", status_code=400, code="missing_shipped_to")
@@ -851,6 +1110,17 @@ def create_stripe_checkout_session(request):
         if missing:
             return error_response(f"shippingDetails missing: {', '.join(missing)}", status_code=400, code="missing_shipping_fields")
 
+        zip_code = normalize_zip_code(shipping_details.get('zip'))
+        if not zip_code:
+            return error_response(
+                "zip debe ser un código postal válido de 5 dígitos.",
+                status_code=400,
+                code="invalid_zip_code",
+            )
+        # Store the normalized (zero-padded, digits-only) ZIP so fulfillment
+        # and the future label generation always see a clean value.
+        shipping_details['zip'] = zip_code
+
     if not email:
         return error_response("User email not found", status_code=400, code="user_email_missing")
 
@@ -858,7 +1128,40 @@ def create_stripe_checkout_session(request):
 
     if not cart or cart.cart_items.count() == 0:
         return error_response("Cart is empty or not found", status_code=400, code="cart_empty")
-    
+
+    # Home deliveries: re-quote server-side so the customer is charged the
+    # real courier price — never an amount sent from the browser.
+    shipping_line_item = None
+    shipping_meta = {}
+    if shipped_to == "home":
+        package = build_package_from_cart(cart)
+        try:
+            quotes = get_shipping_quotes(zip_code, package)
+        except ShippingQuoteError as exc:
+            return error_response(exc.message, status_code=502, code=exc.code)
+        selected_quote = select_cheapest_quote(quotes)
+        if selected_quote is None:
+            return error_response(
+                f"No hay opciones de envío con {PREFERRED_COURIER} para el código postal {zip_code}.",
+                status_code=400,
+                code="shipping_unavailable",
+            )
+        shipping_cost = Decimal(str(selected_quote.get('total', '0'))).quantize(Decimal('0.01'))
+        shipping_meta = {
+            'shipping_cost': str(shipping_cost),
+            'shipping_courier': str(selected_quote.get('courier') or ''),
+            'shipping_service': str(selected_quote.get('serviceType') or ''),
+        }
+        if shipping_cost > 0:
+            shipping_line_item = {
+                'price_data': {
+                    'currency': 'mxn',
+                    'product_data': {'name': f"Envío ({selected_quote.get('title')})"},
+                    'unit_amount': int(shipping_cost * 100),
+                },
+                'quantity': 1,
+            }
+
     try:
         line_items = []
         for item in cart.cart_items.all():
@@ -882,9 +1185,13 @@ def create_stripe_checkout_session(request):
                 'quantity': item.quantity,
             })
 
+        if shipping_line_item:
+            line_items.append(shipping_line_item)
+
         metadata = {'cart_code': cart_code, 'shipped_to': shipped_to}
         if shipping_details:
             metadata['shipping_details'] = json.dumps(shipping_details)
+        metadata.update(shipping_meta)
 
         success_url = f"{settings.FRONTEND_URL.rstrip('/')}/mis-ordenes?session_id={{CHECKOUT_SESSION_ID}}"
 
@@ -931,6 +1238,15 @@ def _resolve_cart_code_from_session(session):
         return None
 
     carts = Cart.objects.filter(user__email=email).prefetch_related('cart_items__record')
+    # amount_total includes the shipping line item (when present), so subtract
+    # it before comparing against product-only cart totals.
+    metadata = session.get('metadata', {}) or {}
+    try:
+        shipping_cents = int(Decimal(metadata.get('shipping_cost') or '0') * 100)
+    except Exception:
+        shipping_cents = 0
+    if amount_total is not None and shipping_cents:
+        amount_total -= shipping_cents
     candidates = []
 
     for cart in carts:
@@ -957,6 +1273,13 @@ def fulfill_checkout(session, cart_code=None):
             shipping_details = json.loads(raw_shipping) if isinstance(raw_shipping, str) else raw_shipping
         except Exception:
             shipping_details = None
+    if isinstance(shipping_details, dict):
+        # Address values are stored as plain strings for the admin orders view.
+        shipping_details = {key: str(value) for key, value in shipping_details.items()}
+    try:
+        shipping_cost = Decimal(metadata.get('shipping_cost') or '0') or None
+    except Exception:
+        shipping_cost = None
     cart = None
     if cart_code:
         cart = Cart.objects.filter(cart_code=cart_code).prefetch_related('cart_items__record').first()
@@ -973,7 +1296,10 @@ def fulfill_checkout(session, cart_code=None):
             user_email=customer_email,
             shipped_to=shipped_to,
             shipping_details=shipping_details,
-            ship_link="Preparando para envío" if shipped_to == "home" else "",
+            shipping_cost=shipping_cost,
+            shipping_courier=metadata.get('shipping_courier', ''),
+            shipping_service=metadata.get('shipping_service', ''),
+            shipping_link="Preparando para envío" if shipped_to == "home" else "",
             status='paid',
         )
 
@@ -1210,6 +1536,34 @@ def discogs_release_detail(request, release_id):
         entry = {'name': fmt.get('name', ''), 'descriptions': fmt.get('descriptions', [])}
         format_details.append(entry)
 
+    # Weight suggestion (grams) for the Record.weight_grams field: derive it
+    # from the formats using the store's per-unit defaults, falling back to
+    # Discogs' own estimated_weight when the format list is not parseable.
+    def _format_qty(fmt):
+        try:
+            return int(fmt.get('qty') or 1)
+        except (TypeError, ValueError):
+            return 1
+
+    def _is_seven_inch(fmt):
+        haystack = ' '.join([fmt.get('text', '')] + list(fmt.get('descriptions', [])))
+        return "7\"" in haystack or '7"' in haystack or ' 7 ' in f' {haystack} '
+
+    weight_suggestion = 0
+    for fmt in release.get('formats', []):
+        qty = _format_qty(fmt)
+        name = (fmt.get('name') or '').lower()
+        if 'cd' in name:
+            weight_suggestion += CD_UNIT_WEIGHT_GRAMS * qty
+        elif 'vinyl' in name or 'record' in name:
+            weight_suggestion += (SEVEN_INCH_UNIT_WEIGHT_GRAMS if _is_seven_inch(fmt) else DEFAULT_UNIT_WEIGHT_GRAMS) * qty
+    if not weight_suggestion:
+        estimated = release.get('estimated_weight')
+        try:
+            weight_suggestion = int(estimated)
+        except (TypeError, ValueError):
+            weight_suggestion = None
+
     return Response({
         'discogs_id': release.get('id'),
         'title': release.get('title', ''),
@@ -1221,74 +1575,12 @@ def discogs_release_detail(request, release_id):
         'styles': release.get('styles', []),
         'formats': [f.get('name', '') for f in release.get('formats', [])],
         'format_details': format_details,
+        'estimated_weight': release.get('estimated_weight'),
+        'weight_grams_suggestion': weight_suggestion,
         'country': release.get('country', ''),
         'labels': [l.get('name', '') for l in release.get('labels', [])],
         'master_id': master_id,
     })
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def complete_checkout_session(request):
-    blocked = _require_email_verified(request)
-    if blocked:
-        return blocked
-    session_id = (request.data.get('session_id') or '').strip()
-
-    if not session_id:
-        return error_response("session_id is required", status_code=400, code="missing_session_id")
-
-    if Order.objects.filter(stripe_checkout_session_id=session_id).exists():
-        return Response({"message": "Order already created for this session"}, status=200)
-
-    try:
-        session = stripe.checkout.Session.retrieve(session_id)
-        cart_code = _resolve_cart_code_from_session(session)
-        fulfill_checkout(session, cart_code)
-        return Response({"message": "Order created successfully"}, status=200)
-    except Exception as e:
-        return error_response(str(e), status_code=500, code="checkout_complete_error")
-
-@api_view(['GET'])
-def checkout_success(request):
-    session_id = request.query_params.get('session_id', '').strip()
-
-    if not session_id:
-        return error_response("session_id is required", status_code=400, code="missing_session_id")
-
-    order = Order.objects.filter(stripe_checkout_session_id=session_id).first()
-
-    if order:
-        return Response({"message": "Payment confirmed ✅ / order created", "status": order.status}, status=200)
-
-    try:
-        session = stripe.checkout.Session.retrieve(session_id)
-        if session.get("payment_status") == "paid":
-            cart_code = _resolve_cart_code_from_session(session)
-            fulfill_checkout(session, cart_code)
-            order = Order.objects.filter(stripe_checkout_session_id=session_id).first()
-            if order:
-                return Response({"message": "Payment confirmed ✅ / order created", "status": order.status}, status=200)
-    except Exception as exc:
-        logger.warning("checkout_success fallback failed for session %s: %s", session_id, exc)
-
-    return Response({"message": "We’re still confirming your payment… refresh in a moment", "status": "pending"}, status=200)
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_user_orders(request):
-    blocked = _require_email_verified(request)
-    if blocked:
-        return blocked
-    email = getattr(request.user, 'email', None)
-
-    if not email:
-        return error_response("User email not found", status_code=400, code="user_email_missing")
-
-    orders = Order.objects.filter(user_email=email).order_by('-created_at').prefetch_related('order_items__record')
-    serializer = OrderSerializer(orders, many=True)
-    return Response(serializer.data, status=200)
-
 
 @csrf_exempt
 def stripe_webhook(request):
@@ -1377,6 +1669,8 @@ def stripe_webhook(request):
 
     print(">>> webhook handled successfully (200)")
     return HttpResponse(status=200)
+
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
