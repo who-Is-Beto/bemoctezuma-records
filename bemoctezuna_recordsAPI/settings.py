@@ -15,7 +15,11 @@ from datetime import timedelta
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# override=True locally so .env beats values inherited from a parent process
+# (runserver's autoreload child inherits the parent's env — without this, .env
+# edits never reach the reloaded server). Under `railway run` /
+# RAILWAY_ENVIRONMENT, keep Railway-injected vars authoritative instead.
+load_dotenv(override=not os.getenv('RAILWAY_ENVIRONMENT'))
 # Local overrides (dev/staging) — gitignored, wins over .env. No-op when absent.
 # Skipped when RAILWAY_ENVIRONMENT is set (deployed services AND `railway run`
 # both set it) so CLI commands like `railway run python manage.py migrate`
@@ -225,6 +229,19 @@ FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 REQUIRE_EMAIL_VERIFICATION = os.getenv('REQUIRE_EMAIL_VERIFICATION', 'False').lower() == 'true'
 
 DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
+
+# Envíos Perros (delivery quotes/labels). Same token works for staging and prod;
+# ENVIOS_PERROS_API_URL decides the environment:
+#   staging: https://staging-app.enviosperros.com/api/v3
+#   prod:    https://app.enviosperros.com/api/v3
+ENVIOS_PERROS_TOKEN = os.getenv('ENVIOS_PERROS_TOKEN', '').strip()
+ENVIOS_PERROS_API_URL = os.getenv(
+    'ENVIOS_PERROS_API_URL', 'https://staging-app.enviosperros.com/api/v3'
+).strip().rstrip('/')
+ORIGIN_ZIP_CODE = os.getenv('ORIGIN_ZIP_CODE', '15400')
+# Outbound timeout (seconds) — keep small so checkout never hangs on a slow
+# courier API (same lesson as EMAIL_TIMEOUT).
+ENVIOS_PERROS_TIMEOUT = int(os.getenv('ENVIOS_PERROS_TIMEOUT', '10'))
 
 # Who gets a notification when a customer places an order (comma-separated env).
 SELLER_NOTIFY_EMAILS = [

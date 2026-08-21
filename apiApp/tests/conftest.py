@@ -48,7 +48,7 @@ def order(db):
             "phone": "555",
             "reference": "x",
         },
-        ship_link='',
+        shipping_link='',
         status='paid',
     )
     order_item = OrderItem.objects.create(

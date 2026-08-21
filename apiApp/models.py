@@ -39,11 +39,13 @@ class Category(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.name)
-            unique_slug = self.slug
+            max_len = self._meta.get_field('slug').max_length
+            base_slug = slugify(self.name)[:max_len].rstrip('-')
+            unique_slug = base_slug
             counter = 1
-            if Category.objects.filter(slug=unique_slug).exists():
-                unique_slug = f"{self.slug}-{counter}"
+            while Category.objects.filter(slug=unique_slug).exists():
+                suffix = f"-{counter}"
+                unique_slug = f"{base_slug[:max_len - len(suffix)]}{suffix}"
                 counter += 1
             self.slug = unique_slug
         super().save(*args, **kwargs)
@@ -57,11 +59,13 @@ class Artist(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.name)
-            unique_slug = self.slug
+            max_len = self._meta.get_field('slug').max_length
+            base_slug = slugify(self.name)[:max_len].rstrip('-')
+            unique_slug = base_slug
             counter = 1
-            if Artist.objects.filter(slug=unique_slug).exists():
-                unique_slug = f"{self.slug}-{counter}"
+            while Artist.objects.filter(slug=unique_slug).exists():
+                suffix = f"-{counter}"
+                unique_slug = f"{base_slug[:max_len - len(suffix)]}{suffix}"
                 counter += 1
             self.slug = unique_slug
         super().save(*args, **kwargs)
@@ -76,11 +80,13 @@ class Genere(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.name)
-            unique_slug = self.slug
+            max_len = self._meta.get_field('slug').max_length
+            base_slug = slugify(self.name)[:max_len].rstrip('-')
+            unique_slug = base_slug
             counter = 1
-            if Genere.objects.filter(slug=unique_slug).exists():
-                unique_slug = f"{self.slug}-{counter}"
+            while Genere.objects.filter(slug=unique_slug).exists():
+                suffix = f"-{counter}"
+                unique_slug = f"{base_slug[:max_len - len(suffix)]}{suffix}"
                 counter += 1
             self.slug = unique_slug
         super().save(*args, **kwargs)
@@ -113,6 +119,10 @@ class Record(models.Model):
     release_date = models.PositiveIntegerField(blank=True, null=True, default=2025)
     featured = models.BooleanField(default=True)
     items_inside = models.PositiveIntegerField(default=1)
+    # Weight in grams of a single unit (one items_inside set). When null,
+    # shipping weight falls back to the category-based default in services.py
+    # (LP 300g, 7" 100g, CD 85g).
+    weight_grams = models.PositiveIntegerField(blank=True, null=True, validators=[MinValueValidator(0)])
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='records', blank=True, null=True)
 
     def __str__(self):
@@ -125,11 +135,13 @@ class Record(models.Model):
         self.sell_price = (price * (1 - discount / 100)).quantize(Decimal('0.01'))
 
         if not self.slug:
-            self.slug = slugify(self.title)
-            unique_slug = self.slug
+            max_len = self._meta.get_field('slug').max_length
+            base_slug = slugify(self.title)[:max_len].rstrip('-')
+            unique_slug = base_slug
             counter = 1
-            if Record.objects.filter(slug=unique_slug).exists():
-                unique_slug = f"{self.slug}-{counter}"
+            while Record.objects.filter(slug=unique_slug).exists():
+                suffix = f"-{counter}"
+                unique_slug = f"{base_slug[:max_len - len(suffix)]}{suffix}"
                 counter += 1
             self.slug = unique_slug
         super().save(*args, **kwargs)
@@ -215,7 +227,10 @@ class Order(models.Model):
     user_email = models.EmailField()
     shipped_to = models.CharField(max_length=255)
     shipping_details = models.JSONField(null=True, blank=True, default=dict)
-    ship_link = models.CharField(max_length=255, blank=True, default="")
+    shipping_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    shipping_courier = models.CharField(max_length=50, blank=True, default="")
+    shipping_service = models.CharField(max_length=50, blank=True, default="")
+    shipping_link = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=50, choices=status_choices, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -224,10 +239,13 @@ class Order(models.Model):
         return f"Orden {self.id} - {self.status}"
     
 class OrderItem(models.Model):
+    # record is nullable (SET_NULL): permanently deleting a record must keep
+    # historical orders intact (quantity + snapshotted price survive).
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='order_items')
-    record = models.ForeignKey(Record, on_delete=models.CASCADE)
+    record = models.ForeignKey(Record, on_delete=models.SET_NULL, null=True, blank=True)
     quantity = models.PositiveIntegerField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
 
     def __str__(self):
-        return f"{self.quantity} x {self.record.title} en la orden {self.order.id}"
+        title = self.record.title if self.record else "(disco eliminado)"
+        return f"{self.quantity} x {title} en la orden {self.order.id}"
