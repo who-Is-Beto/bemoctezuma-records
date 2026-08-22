@@ -4,6 +4,7 @@ flows when REQUIRE_EMAIL_VERIFICATION is enabled, regardless of JWT presence.
 import pytest
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.urls import reverse
 
 from apiApp.models import Cart, CartItem, Record
 
@@ -72,7 +73,7 @@ def test_add_to_cart_allowed_when_unverified_and_gate_off(settings, api_client, 
 
 def test_get_carts_blocked_when_unverified_and_gate_on(gate_on, api_client, unverified_user):
     api_client.force_authenticate(user=unverified_user)
-    resp = api_client.get('/carts/')
+    resp = api_client.get(reverse('get-all-carts'))
 
     assert resp.status_code == 403
     assert resp.data['error']['code'] == 'email_not_verified'
