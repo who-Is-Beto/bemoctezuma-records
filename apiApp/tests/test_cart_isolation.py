@@ -111,6 +111,42 @@ def test_get_cart_hides_foreign_cart(db):
     assert resp.status_code == 404
 
 
+# ── get_cart auto-creates on unknown code ────────────────────────────────
+
+def test_get_cart_unknown_code_creates_empty_owned_cart(api_client, db):
+    """A stale/unknown cart_code returns a fresh empty cart instead of 404."""
+    user = _verified_user("freshcart")
+    before = Cart.objects.count()
+
+    api_client.force_authenticate(user=user)
+    resp = api_client.get(reverse("get-cart", args=["no-such-cart-code"]))
+
+    assert resp.status_code == 200
+    assert resp.data["cart_code"] != "no-such-cart-code"
+    assert resp.data["user"] == user.id
+    assert resp.data["cart_items"] == []
+    assert resp.data["total_price"] == 0
+    assert Cart.objects.count() == before + 1
+    assert Cart.objects.filter(
+        user=user, cart_code=resp.data["cart_code"]
+    ).exists()
+
+
+def test_get_cart_foreign_cart_creates_nothing(db):
+    """The isolation branch keeps 404-ing and never creates a cart."""
+    owner = _verified_user("ownerpeek")
+    peeker = _verified_user("peekerpeek")
+    foreign = Cart.objects.create(user=owner)
+    before = Cart.objects.count()
+
+    peeker_client = APIClient()
+    peeker_client.force_authenticate(user=peeker)
+    resp = peeker_client.get(reverse("get-cart", args=[foreign.cart_code]))
+
+    assert resp.status_code == 404
+    assert Cart.objects.count() == before
+
+
 def test_add_still_accepts_own_cart_code(api_client, record, db):
     user = _verified_user("returning")
     own = Cart.objects.create(user=user)

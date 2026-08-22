@@ -595,7 +595,9 @@ def get_cart(request, cart_code):
     try:
         cart = Cart.objects.get(cart_code=cart_code)
     except Cart.DoesNotExist:
-        return error_response("Cart not found", status_code=404, code="cart_not_found")
+        # Unknown code (e.g. a stale cart_code cached by the frontend): instead
+        # of 404-ing forever, hand back a fresh empty cart for this user.
+        cart = Cart.objects.create(user=request.user)
     # Someone else's cart is invisible; anonymous (user=None) legacy carts
     # stay reachable until claimed via add_to_cart.
     if cart.user_id not in (None, request.user.id):
