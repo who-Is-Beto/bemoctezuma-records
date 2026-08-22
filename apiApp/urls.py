@@ -12,7 +12,10 @@ urlpatterns = [
     path('categories/', views.get_category_list, name='category-list'),
     path('categories/<slug:slug>/', views.get_category_detail, name='category-detail'),
     path('cart-items/', views.get_all_cart_items, name='get-all-cart-items'),
-    path('carts/', views.get_all_carts, name='get-all-carts'),
+    path('cart/', views.get_all_carts, name='get-all-carts'),
+    # Deprecated plural alias — kept so older frontend deploys keep working.
+    # Remove once the frontend is fully on /cart/.
+    path('carts/', views.get_all_carts, name='get-all-carts-legacy'),
     path('cart/add/', views.add_to_cart, name='add-to-cart'),
     path('cart/update/', views.update_cart_quantity, name='update-cart-quantity'),
     path('cart/remove/', views.remove_cart_item, name='remove-cart-item'),
