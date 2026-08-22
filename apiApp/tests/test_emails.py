@@ -381,8 +381,18 @@ def test_resend_verification_email_case_insensitive(api_client, user):
 
 
 @pytest.mark.django_db
-def test_resend_throttled(api_client, user):
+def test_resend_throttled(api_client, user, settings):
     cache.clear()
+    # Pin the rate this scenario was written for (reassigning the whole
+    # REST_FRAMEWORK dict triggers DRF's setting-changed reload; mutating the
+    # nested dict would not).
+    settings.REST_FRAMEWORK = {
+        **settings.REST_FRAMEWORK,
+        "DEFAULT_THROTTLE_RATES": {
+            **settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"],
+            "email_verify": "5/hour",
+        },
+    }
     url = reverse('resend-verification-email')
     statuses = [
         api_client.post(url, {'email': user.email}, format='json').status_code

@@ -596,6 +596,10 @@ def get_cart(request, cart_code):
         cart = Cart.objects.get(cart_code=cart_code)
     except Cart.DoesNotExist:
         return error_response("Cart not found", status_code=404, code="cart_not_found")
+    # Someone else's cart is invisible; anonymous (user=None) legacy carts
+    # stay reachable until claimed via add_to_cart.
+    if cart.user_id not in (None, request.user.id):
+        return error_response("Cart not found", status_code=404, code="cart_not_found")
 
     serializer = CartSerializer(cart)
     return Response(serializer.data)
@@ -606,7 +610,9 @@ def get_all_carts(request):
     blocked = _require_email_verified(request)
     if blocked:
         return blocked
-    carts = Cart.objects.all()
+    # Only the requester's carts. This used to be Cart.objects.all(), which
+    # handed every client the first cart in the DB — all users shared a cart.
+    carts = Cart.objects.filter(user=request.user).order_by('-updated_at')
     serializer = CartSerializer(carts, many=True)
     return Response(serializer.data)
 
@@ -631,18 +637,28 @@ def add_to_cart(request):
         record_id = int(request.data.get('record_id'))
     except (TypeError, ValueError):
         return error_response("record_id is required", status_code=400, code="record_id_required")
-    email = request.data.get('email')
     try:
         quantity = int(request.data.get('quantity', 1))
     except (TypeError, ValueError):
         return error_response("quantity must be a number", status_code=400, code="quantity_invalid")
     if quantity < 1:
         return error_response("quantity must be at least 1", status_code=400, code="quantity_invalid")
-    user = User.objects.get(email=email) if email else None
+
+    # Ownership is derived from the authenticated user, never from the
+    # request body. Carts created before this fix have user=None and get
+    # claimed by whoever legitimately uses their code first.
     if cart_code:
-        cart, _ = Cart.objects.get_or_create(cart_code=cart_code, defaults={'user': user})
+        try:
+            cart = Cart.objects.get(cart_code=cart_code)
+        except Cart.DoesNotExist:
+            return error_response("Cart not found", status_code=404, code="cart_not_found")
+        if cart.user_id not in (None, request.user.id):
+            return error_response("Cart not found", status_code=404, code="cart_not_found")
+        if cart.user_id is None:
+            cart.user = request.user
+            cart.save(update_fields=['user', 'updated_at'])
     else:
-        cart = Cart.objects.create(user=user)
+        cart = Cart.objects.create(user=request.user)
     try:
         record = Record.objects.get(id=str(record_id))
     except Record.DoesNotExist:
