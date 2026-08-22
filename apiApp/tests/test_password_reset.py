@@ -199,8 +199,18 @@ def test_confirm_success_returns_no_tokens(api_client, user):
 
 
 @pytest.mark.django_db
-def test_request_throttled(api_client):
+def test_request_throttled(api_client, settings):
     cache.clear()
+    # Pin the rate this scenario was written for (reassigning the whole
+    # REST_FRAMEWORK dict triggers DRF's setting-changed reload; mutating the
+    # nested dict would not).
+    settings.REST_FRAMEWORK = {
+        **settings.REST_FRAMEWORK,
+        "DEFAULT_THROTTLE_RATES": {
+            **settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"],
+            "password_reset_request": "5/hour",
+        },
+    }
     url = reverse('password-reset-request')
     statuses = [
         api_client.post(url, {'email': 'ghost@nowhere.invalid'}, format='json').status_code
