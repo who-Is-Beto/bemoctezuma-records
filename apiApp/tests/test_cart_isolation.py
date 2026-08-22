@@ -86,7 +86,9 @@ def test_add_claims_anonymous_cart_on_first_use(api_client, record, db):
     assert legacy.user_id == user.id
 
 
-def test_add_rejects_foreign_cart(record, db):
+def test_add_with_foreign_code_does_not_touch_foreign_cart(api_client, record, db):
+    """A foreign cart_code must never receive items — the item lands in the
+    intruder's own cart instead (self-healing, no 404 loop)."""
     owner = _verified_user("owner")
     intruder = _verified_user("intruder")
     foreign = Cart.objects.create(user=owner)
@@ -97,10 +99,16 @@ def test_add_rejects_foreign_cart(record, db):
         intruder_client,
         {"cart_code": foreign.cart_code, "record_id": record.id},
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.data["cart_code"] != foreign.cart_code
+    assert resp.data["user"] == intruder.id
+    foreign.refresh_from_db()
+    assert foreign.cart_items.count() == 0
 
 
 def test_get_cart_hides_foreign_cart(db):
+    """A foreign cart's data/code is never exposed; the requester gets their
+    own usable cart back instead of a 404 they can never recover from."""
     owner = _verified_user("ownercart")
     peeker = _verified_user("peeker")
     foreign = Cart.objects.create(user=owner)
@@ -108,7 +116,9 @@ def test_get_cart_hides_foreign_cart(db):
     peeker_client = APIClient()
     peeker_client.force_authenticate(user=peeker)
     resp = peeker_client.get(reverse("get-cart", args=[foreign.cart_code]))
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.data["cart_code"] != foreign.cart_code
+    assert resp.data["user"] == peeker.id
 
 
 # ── get_cart auto-creates on unknown code ────────────────────────────────
@@ -132,19 +142,53 @@ def test_get_cart_unknown_code_creates_empty_owned_cart(api_client, db):
     ).exists()
 
 
-def test_get_cart_foreign_cart_creates_nothing(db):
-    """The isolation branch keeps 404-ing and never creates a cart."""
+def test_get_cart_foreign_code_returns_own_cart_and_leaves_foreign_alone(db):
+    """Prod repro: a localStorage code pointing at ANOTHER account's cart used
+    to 404 forever. Now the requester gets their own cart; the foreign cart is
+    neither exposed nor mutated."""
     owner = _verified_user("ownerpeek")
     peeker = _verified_user("peekerpeek")
     foreign = Cart.objects.create(user=owner)
-    before = Cart.objects.count()
 
     peeker_client = APIClient()
     peeker_client.force_authenticate(user=peeker)
     resp = peeker_client.get(reverse("get-cart", args=[foreign.cart_code]))
 
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.data["cart_code"] != foreign.cart_code
+    assert resp.data["user"] == peeker.id
+    foreign.refresh_from_db()
+    assert Cart.objects.filter(cart_code=foreign.cart_code).exists()
+
+
+def test_get_cart_unknown_code_reuses_users_most_recent_cart(api_client, db):
+    """A stale code must not spawn a fresh orphan cart on every page load —
+    reuse the user's most recent cart instead (mirrors frontend carts[0])."""
+    user = _verified_user("returning2")
+    existing = Cart.objects.create(user=user)
+
+    api_client.force_authenticate(user=user)
+    resp = api_client.get(reverse("get-cart", args=["garbage-code-xyz"]))
+
+    assert resp.status_code == 200
+    assert resp.data["cart_code"] == existing.cart_code
+
+
+def test_add_with_stale_code_uses_most_recent_cart(api_client, record, db):
+    """Add flow self-heals too: item goes into the user's existing cart, no
+    duplicate cart rows, no 404."""
+    user = _verified_user("staleadd")
+    existing = Cart.objects.create(user=user)
+    before = Cart.objects.count()
+
+    api_client.force_authenticate(user=user)
+    resp = _add(api_client, {"cart_code": "garbage-code-xyz", "record_id": record.id})
+
+    assert resp.status_code == 200
+    assert resp.data["cart_code"] == existing.cart_code
     assert Cart.objects.count() == before
+    existing.refresh_from_db()
+    assert existing.cart_items.count() == 1
 
 
 def test_add_still_accepts_own_cart_code(api_client, record, db):

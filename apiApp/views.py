@@ -592,16 +592,21 @@ def get_cart(request, cart_code):
     blocked = _require_email_verified(request)
     if blocked:
         return blocked
-    try:
-        cart = Cart.objects.get(cart_code=cart_code)
-    except Cart.DoesNotExist:
-        # Unknown code (e.g. a stale cart_code cached by the frontend): instead
-        # of 404-ing forever, hand back a fresh empty cart for this user.
-        cart = Cart.objects.create(user=request.user)
+    cart = Cart.objects.filter(cart_code=cart_code).first()
     # Someone else's cart is invisible; anonymous (user=None) legacy carts
-    # stay reachable until claimed via add_to_cart.
-    if cart.user_id not in (None, request.user.id):
-        return error_response("Cart not found", status_code=404, code="cart_not_found")
+    # stay reachable until claimed via add_to_cart. A foreign cart is treated
+    # exactly like a missing one — never 404 the client into a retry loop.
+    if cart is not None and cart.user_id not in (None, request.user.id):
+        cart = None
+    if cart is None:
+        # Stale/foreign/unknown cart_code (e.g. localStorage kept a code from
+        # another account on this browser): hand back the user's most recent
+        # own cart, or a brand-new empty one owned by them.
+        cart = (
+            Cart.objects.filter(user=request.user)
+            .order_by('-updated_at')
+            .first()
+        ) or Cart.objects.create(user=request.user)
 
     serializer = CartSerializer(cart)
     return Response(serializer.data)
@@ -649,18 +654,22 @@ def add_to_cart(request):
     # Ownership is derived from the authenticated user, never from the
     # request body. Carts created before this fix have user=None and get
     # claimed by whoever legitimately uses their code first.
+    cart = None
     if cart_code:
-        try:
-            cart = Cart.objects.get(cart_code=cart_code)
-        except Cart.DoesNotExist:
-            return error_response("Cart not found", status_code=404, code="cart_not_found")
-        if cart.user_id not in (None, request.user.id):
-            return error_response("Cart not found", status_code=404, code="cart_not_found")
-        if cart.user_id is None:
-            cart.user = request.user
-            cart.save(update_fields=['user', 'updated_at'])
-    else:
-        cart = Cart.objects.create(user=request.user)
+        candidate = Cart.objects.filter(cart_code=cart_code).first()
+        if candidate is not None and candidate.user_id in (None, request.user.id):
+            cart = candidate
+            if cart.user_id is None:
+                cart.user = request.user
+                cart.save(update_fields=['user', 'updated_at'])
+    if cart is None:
+        # Stale/foreign/absent cart_code: self-heal by adding into the user's
+        # most recent own cart (or a new one) instead of failing the request.
+        cart = (
+            Cart.objects.filter(user=request.user)
+            .order_by('-updated_at')
+            .first()
+        ) or Cart.objects.create(user=request.user)
     try:
         record = Record.objects.get(id=str(record_id))
     except Record.DoesNotExist:
