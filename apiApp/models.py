@@ -127,12 +127,22 @@ class Record(models.Model):
 
     def __str__(self):
         return f"{self.title} by {self.artist}"
-    
-    def save(self, *args, **kwargs):
-        # Auto-calculate sell_price from price and discount_porcentage
+
+    @property
+    def effective_price(self):
+        """Always-computed customer-facing price from price + discount.
+
+        Falls back to the stored ``sell_price`` when price is missing, but
+        otherwise recalculates so stale DB values (e.g. ``sell_price=0`` from
+        a raw-SQL import) never leak into the cart / checkout.
+        """
         price = Decimal(str(self.price)) if self.price is not None else Decimal('0')
         discount = Decimal(str(self.discount_porcentage or 0))
-        self.sell_price = (price * (1 - discount / 100)).quantize(Decimal('0.01'))
+        return (price * (1 - discount / 100)).quantize(Decimal('0.01'))
+
+    def save(self, *args, **kwargs):
+        # Auto-calculate sell_price from price and discount_porcentage
+        self.sell_price = self.effective_price
 
         if not self.slug:
             max_len = self._meta.get_field('slug').max_length

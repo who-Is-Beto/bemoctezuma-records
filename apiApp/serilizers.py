@@ -6,6 +6,19 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 
+
+def _normalize_decimal_string(value):
+    """Accept price strings with comma decimals ("500,00") or dots ("500.00").
+
+    Front-end forms in es-MX locale commonly submit "1234,56" which
+    Python's Decimal() rejects.  This normalises to "1234.56" before
+    DRF's DecimalField runs its own validation.
+    """
+    if isinstance(value, str):
+        value = value.strip().replace(',', '.')
+    return value
+
+
 class UserRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
         model = get_user_model()
@@ -54,17 +67,29 @@ class RecordDetailSerializer(serializers.ModelSerializer):
     artist = ArtistSerializer(read_only=True)
     category = CategorySerializer(read_only=True)
     genere = GenereSerializer(read_only=True)
+    sell_price = serializers.SerializerMethodField()
+
     class Meta:
         model = Record
         fields = '__all__'
+
+    def get_sell_price(self, obj):
+        """Always return the computed price so stale DB values never leak."""
+        return str(obj.effective_price)
         
 class RecordListSerializer(serializers.ModelSerializer):
     artist = ArtistSerializer(read_only=True)
     category = CategoryListSerializer(read_only=True)
     genere = GenereSerializer(read_only=True)
+    sell_price = serializers.SerializerMethodField()
+
     class Meta:
         model = Record
         fields = ['id', 'title', 'condition', 'category', 'artist', 'genere', 'cover_image_url', 'price', 'cost_price', 'sell_price', 'final_sale_price', 'discount_porcentage', 'stock', 'slug', 'images']
+
+    def get_sell_price(self, obj):
+        """Always return the computed price so stale DB values never leak."""
+        return str(obj.effective_price)
 
 
 
@@ -91,6 +116,13 @@ class RecordCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """sell_price is auto-calculated in Record.save() from price + discount."""
         return super().create(validated_data)
+
+    def to_internal_value(self, data):
+        # Normalise comma-decimal strings before DRF field validation
+        for field in ('price', 'cost_price', 'final_sale_price'):
+            if field in data:
+                data[field] = _normalize_decimal_string(data[field])
+        return super().to_internal_value(data)
 
     def validate_price(self, value):
         if value <= 0:
@@ -126,7 +158,7 @@ class CartItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'record', 'quantity', 'subtotal']
 
     def get_subtotal(self, cart_item):
-        return cart_item.quantity * cart_item.record.sell_price
+        return cart_item.quantity * cart_item.record.effective_price
     
 class CartSerializer(serializers.ModelSerializer):
     cart_items = CartItemSerializer(many=True, read_only=True)
@@ -136,7 +168,7 @@ class CartSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'cart_code', 'created_at', 'updated_at', 'cart_items', 'total_price']
 
     def get_total_price(self, cart):
-        total = sum(item.quantity * item.record.sell_price for item in cart.cart_items.all())
+        total = sum(item.quantity * item.record.effective_price for item in cart.cart_items.all())
         return total
 
 class CartStatSerializer(serializers.ModelSerializer):
@@ -256,6 +288,13 @@ class RecordUpdateSerializer(serializers.ModelSerializer):
         } | {
             'sell_price': {'read_only': True},
         }
+
+    def to_internal_value(self, data):
+        # Normalise comma-decimal strings before DRF field validation
+        for field in ('price', 'cost_price', 'final_sale_price'):
+            if field in data:
+                data[field] = _normalize_decimal_string(data[field])
+        return super().to_internal_value(data)
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):

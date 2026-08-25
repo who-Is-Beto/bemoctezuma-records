@@ -1059,7 +1059,7 @@ def shipping_quote(request):
         )
 
     subtotal = sum(
-        (item.record.sell_price * item.quantity for item in cart.cart_items.all()),
+        (item.record.effective_price * item.quantity for item in cart.cart_items.all()),
         Decimal('0'),
     )
     return Response({
@@ -1233,7 +1233,7 @@ def create_stripe_checkout_session(request):
                             'record_id': str(item.record.id),
                         },
                     },
-                    'unit_amount': int(item.record.sell_price * 100),
+                    'unit_amount': int(item.record.effective_price * 100),
                 },
                 'quantity': item.quantity,
             })
@@ -1309,7 +1309,7 @@ def _resolve_cart_code_from_session(session):
     for cart in carts:
         cents = 0
         for item in cart.cart_items.all():
-            cents += int(item.record.sell_price * 100) * int(item.quantity)
+            cents += int(item.record.effective_price * 100) * int(item.quantity)
         if amount_total is not None and cents == amount_total:
             candidates.append(cart.cart_code)
 
@@ -1412,7 +1412,7 @@ def fulfill_checkout(session, cart_code=None):
                     order=order,
                     record=item.record,
                     quantity=item.quantity,
-                    price=item.record.sell_price,
+                    price=item.record.effective_price,
                 )
 
         # Decrement stock per item, atomically and never below zero.
