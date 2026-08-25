@@ -376,6 +376,10 @@ class BazarSerializer(serializers.ModelSerializer):
             url = obj.image.url
         except ValueError:
             return None
+        # S3 backends already return an absolute https:// URL -- only
+        # build_absolute_uri for relative paths (local FileSystemStorage).
+        if url.startswith(('http://', 'https://')):
+            return url
         request = self.context.get('request')
         return request.build_absolute_uri(url) if request else url
 

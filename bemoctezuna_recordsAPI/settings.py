@@ -206,18 +206,57 @@ APPEND_SLASH = False
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STORAGES = {
-    # Required for file uploads (e.g. Bazar images): Django 5.2 needs an
-    # explicit "default" storage; without it any upload raises
-    # InvalidStorageError.
-    "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
-    },
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
-}
-MEDIA_URL = '/media/'
+# ── Tell Django we're behind a reverse proxy (Cloudflare -> Railway) ──
+# Without this, request.is_secure() returns False and build_absolute_uri()
+# generates http:// URLs that browsers block as mixed content.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# ── Media / file storage ──────────────────────────────────────────────
+# In production (STORAGE_BUCKET env var set) uploads go to S3-compatible
+# cloud storage (Cloudflare R2, AWS S3, DigitalOcean Spaces, etc.) so
+# files survive deploys and are served via CDN.  Locally, files land in
+# MEDIA_ROOT on disk.
+_STORAGE_BUCKET = os.getenv("STORAGE_BUCKET")
+if _STORAGE_BUCKET:
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    AWS_STORAGE_BUCKET_NAME = _STORAGE_BUCKET
+    AWS_ACCESS_KEY_ID = os.getenv("STORAGE_ACCESS_KEY")
+    AWS_SECRET_ACCESS_KEY = os.getenv("STORAGE_SECRET_KEY")
+    # Cloudflare R2 requires an explicit endpoint; leave blank for vanilla S3.
+    AWS_S3_ENDPOINT_URL = os.getenv("STORAGE_ENDPOINT") or None
+    AWS_S3_REGION_NAME = os.getenv("STORAGE_REGION", "auto")
+    # Public domain the frontend uses to load media files.
+    # For R2:  https://pub-<hash>.r2.dev  (or your custom domain)
+    AWS_S3_CUSTOM_DOMAIN = os.getenv("STORAGE_PUBLIC_DOMAIN")
+    AWS_S3_FILE_OVERWRITE = False
+    # None = don't send an ACL header.  R2 bucket-level public access
+    # controls visibility; per-object ACLs are not needed.
+    AWS_DEFAULT_ACL = None
+    AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age=86400"}
+    # Public bucket -> no presigned URLs needed (clean, cacheable URLs).
+    AWS_QUERYSTRING_AUTH = False
+    # Normalise the domain so MEDIA_URL never gets a double https://
+    # (STORAGE_PUBLIC_DOMAIN may already include the scheme).
+    _raw_domain = AWS_S3_CUSTOM_DOMAIN or f"{_STORAGE_BUCKET}.s3.{AWS_S3_REGION_NAME}.amazonaws.com"
+    _domain = _raw_domain.split("://", 1)[-1] if "://" in _raw_domain else _raw_domain
+    MEDIA_URL = f"https://{_domain}/media/"
+else:
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type

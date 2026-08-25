@@ -14,6 +14,20 @@ def _email_test_env(settings):
     mail.outbox.clear()
 
 
+@pytest.fixture(autouse=True)
+def _local_file_storage(settings):
+    """Force FileSystemStorage in tests so uploads land on disk, not R2."""
+    settings.STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    settings.MEDIA_URL = '/media/'
+
+
 @pytest.fixture
 def user(db):
     User = get_user_model()
