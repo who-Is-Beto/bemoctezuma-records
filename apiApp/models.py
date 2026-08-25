@@ -232,6 +232,12 @@ class Order(models.Model):
     shipping_service = models.CharField(max_length=50, blank=True, default="")
     shipping_link = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=50, choices=status_choices, default='pending')
+    # Set when shipped_to == 'bazar': the bazar where the customer picks up.
+    # SET_NULL keeps order history intact if the bazar is later deleted.
+    # Lazy string reference because Bazar is defined below Order in this file.
+    pickup_bazar = models.ForeignKey(
+        'apiApp.Bazar', on_delete=models.SET_NULL, null=True, blank=True, related_name='orders'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -249,3 +255,39 @@ class OrderItem(models.Model):
     def __str__(self):
         title = self.record.title if self.record else "(disco eliminado)"
         return f"{self.quantity} x {title} en la orden {self.order.id}"
+
+
+class Bazar(models.Model):
+    """A bazaar / flea-market event where Moctezuma Records sets up a stand.
+
+    Shown publicly on /bazares (upcoming only, ordered by soonest date) and
+    managed from the admin panel ("Manejo de bazares").
+    """
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(default="", blank=True, null=False)
+    image = models.ImageField(upload_to='bazares/%Y/%m/', blank=True, null=True)
+    date = models.DateField()
+    schedule = models.CharField(max_length=200, blank=True, default="",
+                                help_text="e.g. '10:00 am - 6:00 pm'")
+    address = models.CharField(max_length=300)
+    google_maps_url = models.URLField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['date']
+
+    def __str__(self):
+        return f"{self.name} ({self.date})"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            max_len = self._meta.get_field('slug').max_length
+            base_slug = slugify(self.name)[:max_len].rstrip('-')
+            unique_slug = base_slug
+            counter = 1
+            while Bazar.objects.filter(slug=unique_slug).exists():
+                suffix = f"-{counter}"
+                unique_slug = f"{base_slug[:max_len - len(suffix)]}{suffix}"
+                counter += 1
+            self.slug = unique_slug
+        super().save(*args, **kwargs)

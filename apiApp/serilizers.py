@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Record, Category, CartItem, Cart, Wishlist, WishlistItem, Review, Artist, Genere, Order, OrderItem
+from .models import Record, Category, CartItem, Cart, Wishlist, WishlistItem, Review, Artist, Genere, Order, OrderItem, Bazar
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
@@ -179,6 +179,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 class OrderSerializer(serializers.ModelSerializer):
     order_items = OrderItemSerializer(many=True, read_only=True)
+    pickup_bazar = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -194,11 +195,25 @@ class OrderSerializer(serializers.ModelSerializer):
             'shipping_courier',
             'shipping_service',
             'shipping_link',
+            'pickup_bazar',
             'status',
             'created_at',
             'updated_at',
             'order_items',
         ]
+
+    def get_pickup_bazar(self, obj):
+        bazar = obj.pickup_bazar
+        if bazar is None:
+            return None
+        return {
+            'id': bazar.id,
+            'name': bazar.name,
+            'date': bazar.date.isoformat(),
+            'schedule': bazar.schedule,
+            'address': bazar.address,
+            'google_maps_url': bazar.google_maps_url,
+        }
 
 class AdminUserSerializer(serializers.ModelSerializer):
     """Read-only serializer for admin user list."""
@@ -297,3 +312,35 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
         self.context['user'] = user
         return attrs
+
+
+class BazarSerializer(serializers.ModelSerializer):
+    """Serializer for Bazar CRUD (admin write, public read).
+
+    `image` accepts an uploaded file on create/update; `image_url` is the
+    absolute URL the frontend should use to display it.
+    """
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Bazar
+        fields = [
+            'id', 'name', 'slug', 'image', 'image_url', 'date',
+            'schedule', 'address', 'google_maps_url', 'created_at',
+        ]
+        read_only_fields = ['slug']
+
+    def get_image_url(self, obj):
+        if not obj.image:
+            return None
+        try:
+            url = obj.image.url
+        except ValueError:
+            return None
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
+
+    def validate_date(self, value):
+        # Past dates are allowed: admins can backfill bazares that already
+        # happened and manage them from the admin list.
+        return value

@@ -173,10 +173,45 @@ En desarrollo local, `.env.local` tiene `REQUIRE_EMAIL_VERIFICATION=true` activo
 ### Tests
 
 ```bash
-python -m pytest apiApp/tests/ -q
+python3 -m pytest apiApp/tests/ -q
 ```
 
-Incluyen cobertura de la verificación en `apiApp/tests/test_emails.py` (token forjado, uid inválido, idempotencia, reenvío, throttle 429 y login bloqueado/permitido) y del gate de compra en `apiApp/tests/test_verification_gate.py` (carrito, checkout y órdenes bloqueados cuando el usuario no está verificado).
+Cobertura de la verificación en `apiApp/tests/test_emails.py` (token forjado, uid inválido, idempotencia, reenvío, throttle 429 y login bloqueado/permitido), del gate de compra en `apiApp/tests/test_verification_gate.py` (carrito, checkout y órdenes bloqueados cuando el usuario no está verificado), de envíos/admin en `test_shipping.py`, búsqueda en `test_search.py`, slugs en `test_slug_generation.py` y bazares en `test_bazares.py`. Suite completa: **167 passed** (+2 flakes conocidos de throttle por aislamiento de caché).
+
+## Bazares 🎪 (recoger en bazar)
+
+La tienda participa en bazares/tianguis de discos. El modelo `Bazar`
+(`apiApp/models.py`) guarda nombre, fecha, horario, dirección, link de Google
+Maps e imagen del flyer (se guarda en `media/bazares/`). El slug se autogenera
+como el resto de los modelos slugeados, pero es **no único** a propósito: los
+eventos recurrentes repiten nombre.
+
+### Endpoints
+
+| Método | URL | Auth | Descripción |
+|--------|-----|------|-------------|
+| `GET` | `/bazares/` | Público | Próximos eventos (`date >= hoy`), ordenados por fecha ascendente. |
+| `GET` | `/bazares/all/` | Admin | Lista completa (incluye pasados). |
+| `POST` | `/bazares/create/` | Admin | Crear (multipart/form-data, imagen opcional). |
+| `PATCH` | `/bazares/<id>/update/` | Admin | Actualizar campos (permite corregir fechas pasadas). |
+| `DELETE` | `/bazares/<id>/delete/` | Admin | Eliminar bazar. |
+
+### Checkout con recoger en bazar
+
+- Al pagar, si `shipped_to='bazar'` el backend exige un `bazar_id` válido y no
+  pasado; si falta o es inválido responde `missing_bazar`, `invalid_bazar` o
+  `bazar_in_past`.
+- No se cobra envío ni se genera etiqueta para esta modalidad.
+- El bazar elegido viaja como **metadata** de la sesión de Stripe y al
+  confirmarse el pago la orden queda ligada (`Order.pickup_bazar`). Si el
+  bazar se elimina después, la orden conserva su historial (`SET_NULL`).
+- Las órdenes exponen `pickup_bazar` anidado y los correos de pedido incluyen
+  el bloque "Recoger en bazar".
+
+### Migraciones
+
+- `0044_bazar.py` → modelo `Bazar`.
+- `0045_order_pickup_bazar.py` → `Order.pickup_bazar` (FK nullable).
 
 ## Panel de admin / Inventario 🛠️
 
