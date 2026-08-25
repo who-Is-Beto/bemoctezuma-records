@@ -234,7 +234,8 @@ if _STORAGE_BUCKET:
     AWS_S3_REGION_NAME = os.getenv("STORAGE_REGION", "auto")
     # Public domain the frontend uses to load media files.
     # For R2:  https://pub-<hash>.r2.dev  (or your custom domain)
-    AWS_S3_CUSTOM_DOMAIN = os.getenv("STORAGE_PUBLIC_DOMAIN")
+    # Strip scheme if present -- S3Boto3Storage.url() adds https:// itself.
+    AWS_S3_CUSTOM_DOMAIN = (os.getenv("STORAGE_PUBLIC_DOMAIN") or "").split("://", 1)[-1] or None
     AWS_S3_FILE_OVERWRITE = False
     # None = don't send an ACL header.  R2 bucket-level public access
     # controls visibility; per-object ACLs are not needed.
