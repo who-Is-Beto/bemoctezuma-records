@@ -207,6 +207,12 @@ APPEND_SLASH = False
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STORAGES = {
+    # Required for file uploads (e.g. Bazar images): Django 5.2 needs an
+    # explicit "default" storage; without it any upload raises
+    # InvalidStorageError.
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },

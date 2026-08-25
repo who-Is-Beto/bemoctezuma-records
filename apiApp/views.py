@@ -14,6 +14,7 @@ from django.db.models.functions import Replace
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils.encoding import force_bytes
+from django.utils import timezone
 from django.utils.http import urlsafe_base64_encode
 from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
@@ -23,7 +24,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Artist, Cart, CartItem, Category, Genere, Order, OrderItem, Record, Review, Wishlist, WishlistItem
+from .models import Artist, Bazar, Cart, CartItem, Category, Genere, Order, OrderItem, Record, Review, Wishlist, WishlistItem
 from .emails import send_password_recovery_email, send_verification_email, send_welcome_email
 from .services import (
     CD_UNIT_WEIGHT_GRAMS,
@@ -45,6 +46,7 @@ from .serilizers import (
     AdminUserSerializer,
     AdminUserUpdateSerializer,
     ArtistSerializer,
+    BazarSerializer,
     GenereSerializer,
     CartItemSerializer,
     CartSerializer,
@@ -1148,6 +1150,30 @@ def create_stripe_checkout_session(request):
         # and the future label generation always see a clean value.
         shipping_details['zip'] = zip_code
 
+    pickup_bazar = None
+    if shipped_to == "bazar":
+        bazar_id = request.data.get('bazar_id')
+        if not bazar_id:
+            return error_response(
+                "bazar_id is required when shipped_to is 'bazar'",
+                status_code=400,
+                code="missing_bazar",
+            )
+        try:
+            pickup_bazar = Bazar.objects.get(pk=bazar_id)
+        except (Bazar.DoesNotExist, ValueError, TypeError):
+            return error_response(
+                "El bazar seleccionado no existe.",
+                status_code=400,
+                code="invalid_bazar",
+            )
+        if pickup_bazar.date < timezone.localdate():
+            return error_response(
+                "Ese bazar ya pasó. Elige uno próximo.",
+                status_code=400,
+                code="bazar_in_past",
+            )
+
     if not email:
         return error_response("User email not found", status_code=400, code="user_email_missing")
 
@@ -1219,6 +1245,10 @@ def create_stripe_checkout_session(request):
         if shipping_details:
             metadata['shipping_details'] = json.dumps(shipping_details)
         metadata.update(shipping_meta)
+        if pickup_bazar is not None:
+            # Only the id travels in metadata (Stripe metadata values are
+            # strings); fulfillment re-resolves the Bazar from the DB.
+            metadata['bazar_id'] = str(pickup_bazar.id)
 
         success_url = f"{settings.FRONTEND_URL.rstrip('/')}/mis-ordenes?session_id={{CHECKOUT_SESSION_ID}}"
 
@@ -1307,6 +1337,16 @@ def fulfill_checkout(session, cart_code=None):
         shipping_cost = Decimal(metadata.get('shipping_cost') or '0') or None
     except Exception:
         shipping_cost = None
+
+    pickup_bazar = None
+    raw_bazar_id = metadata.get('bazar_id')
+    if raw_bazar_id:
+        try:
+            pickup_bazar = Bazar.objects.get(pk=raw_bazar_id)
+        except (Bazar.DoesNotExist, ValueError, TypeError):
+            pickup_bazar = None
+            logger.warning("Checkout session %s referenced missing bazar %r", session.get('id'), raw_bazar_id)
+
     cart = None
     if cart_code:
         cart = Cart.objects.filter(cart_code=cart_code).prefetch_related('cart_items__record').first()
@@ -1327,6 +1367,7 @@ def fulfill_checkout(session, cart_code=None):
             shipping_courier=metadata.get('shipping_courier', ''),
             shipping_service=metadata.get('shipping_service', ''),
             shipping_link="Preparando para envío" if shipped_to == "home" else "",
+            pickup_bazar=pickup_bazar,
             status='paid',
         )
 
@@ -1760,3 +1801,76 @@ def get_user_orders(request):
     orders = Order.objects.filter(user_email=email).order_by('-created_at').prefetch_related('order_items__record')
     serializer = OrderSerializer(orders, many=True)
     return Response(serializer.data, status=200)
+
+
+@api_view(['GET'])
+def bazar_list(request):
+    """Public list of UPCOMING bazares, ordered by soonest date first."""
+    today = timezone.localdate()
+    bazares = Bazar.objects.filter(date__gte=today).order_by('date', 'id')
+    serializer = BazarSerializer(bazares, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_list_bazares(request):
+    """All bazares (past included), newest first. Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+    bazares = Bazar.objects.order_by('-date', '-id')
+    serializer = BazarSerializer(bazares, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def bazar_create(request):
+    """Create a bazar. Accepts multipart/form-data with an image file. Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    serializer = BazarSerializer(data=request.data, context={'request': request})
+    serializer.is_valid(raise_exception=True)
+    bazar = serializer.save()
+    return Response(BazarSerializer(bazar, context={'request': request}).data, status=201)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def admin_update_bazar(request, bazar_id):
+    """Update a bazar (partial). Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    try:
+        bazar = Bazar.objects.get(pk=bazar_id)
+    except Bazar.DoesNotExist:
+        return error_response("Bazar no encontrado", status_code=404, code="bazar_not_found")
+
+    serializer = BazarSerializer(bazar, data=request.data, partial=True, context={'request': request})
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(BazarSerializer(bazar, context={'request': request}).data)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def admin_delete_bazar(request, bazar_id):
+    """Permanently delete a bazar. The image file on disk is left in place,
+    mirroring admin_delete_record's behavior. Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    try:
+        bazar = Bazar.objects.get(pk=bazar_id)
+    except Bazar.DoesNotExist:
+        return error_response("Bazar no encontrado", status_code=404, code="bazar_not_found")
+
+    name = bazar.name
+    bazar.delete()
+    return Response({"message": f"Bazar '{name}' eliminado permanentemente"}, status=200)

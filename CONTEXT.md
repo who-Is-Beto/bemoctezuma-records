@@ -4,7 +4,7 @@
 > project so a fresh agent session can pick up where the last one left off.
 > Conventions live in `AGENTS.md` — this file is the *what we just did* snapshot.
 
-Last updated: 2026-08-19
+Last updated: 2026-08-24
 
 ---
 
@@ -31,14 +31,24 @@ path `~/Documents/Documents - Roberto's MacBook Air/...` (curly `'`, not straigh
 ## 3. Tests
 
 ```bash
-python -m pytest apiApp/tests/ -q   # 66 passed (2 pre-existing throttle flukes)
+python3 -m pytest apiApp/tests/ -q   # 167 passed (+2 pre-existing throttle flakes)
 ```
+
+Note: the `ecommerceEnv` venv has NO pytest — run with system `python3 -m pytest`.
 
 - `test_emails.py` — verification email tests.
 - `test_verification_gate.py` — cart/checkout/orders gate tests.
 - `test_password_reset.py` — password reset + throttle tests.
 - `test_register_repro.py` — register returns 201 even when email backend fails.
-- Frontend: `npx tsc --noEmit` → zero errors.
+- `test_slug_generation.py` — slug truncation/collision (incl. end-to-end POST).
+- `test_shipping.py` — Envíos Perros quote/locations, admin orders, shipped email.
+- `test_search.py` — tokenized multi-word search.
+- `test_bazares.py` — full Bazar coverage: slugs, public list, admin CRUD,
+  checkout gate, fulfillment, order serialization, emails (37 tests).
+- Known flakes: `test_emails.py::test_resend_throttled`,
+  `test_password_reset.py::test_request_throttled` fail due to test-cache
+  isolation, not regressions.
+- Frontend: `npm run build` (`tsc -b`) is the real check → zero errors.
 
 ## 4. Key conventions & gotchas
 
@@ -337,7 +347,60 @@ errors — **`npm run build` (`tsc -b`) is the real check**. It surfaced the TS
 issues the user reported: missing `completeCheckoutSession` in CartRepository
 type, `vanishingId` typed number vs string ids. Fixed.
 
-## 13. Historical sessions (compressed)
+## 13. Bazares (flea-market pickup) — full feature (2026-08-22 → 2026-08-24)
+
+New "Bazar" concept: recurring flea-market events where the store sets up a
+stand and customers can choose **recoger en bazar** at checkout.
+
+### Backend
+- `Bazar` model (`models.py`): `name`, `date` (DateField), `schedule`,
+  `address`, `google_maps_url`, `image` (ImageField → `media/bazares/`),
+  slug auto-generated like the other slugged models but **non-unique** on
+  purpose (recurring events repeat names; ordering is `Meta.ordering=['date']`).
+  Migrations: `0044_bazar.py`, `0045_order_pickup_bazar.py`.
+- Endpoints (`apiApp/urls.py`, all under `/bazares/`):
+  | Method | Path | Auth |
+  |--------|------|------|
+  | `GET` | `/bazares/` | public — upcoming only (`date >= today`), soonest first |
+  | `GET` | `/bazares/all/` | admin — full list incl. past |
+  | `POST` | `/bazares/create/` | admin — multipart (optional image) |
+  | `PATCH` | `/bazares/<id>/update/` | admin — partial; past-date edits allowed for backfill |
+  | `DELETE` | `/bazares/<id>/delete/` | admin |
+- Checkout gate in `create-checkout-session`: when `shipped_to='bazar'`,
+  requires a valid non-past bazar id → error codes
+  `missing_bazar` / `invalid_bazar` / `bazar_in_past`. Bazar id travels to
+  Stripe as checkout **metadata**; no shipping quote or line item is added.
+- Fulfillment (webhook + `/checkout/complete/` + `/checkout/success/`)
+  resolves `pickup_bazar` from metadata with tolerance for deleted/garbage
+  ids. `Order.pickup_bazar` is `SET_NULL` on delete, so order history keeps.
+- Order serializer nests `pickup_bazar`; order emails render a "Recoger en
+  bazar" block (context dict built in `services.py::_order_email_context`,
+  date as dd/mm/yyyy).
+
+### Frontend (see frontend CONTEXT.md §2 for architecture)
+Public `/bazares` page, checkout BazarPicker, admin tab Manejo de bazares,
+orders show pickup info block.
+
+### Tests
+`apiApp/tests/test_bazares.py` — 37 tests: slug collision suffix + truncation,
+public list filters, admin CRUD auth matrix (401/403), image upload with
+tmp MEDIA_ROOT, SET_NULL order history, every checkout rejection code, today
+allowed, metadata travel, fulfillment tolerance, nested serialization, email
+context + rendered template blocks. Suite total **167 passed** (+2 known
+throttle flakes).
+
+### Hardening session (2026-08-24)
+Frontend refactor for SOLID/clean architecture + SEO/a11y (details in the
+frontend repo's CONTEXT.md): shared `domain/bazares.ts` types, repository
+`bazarService.ts`, `lib/format.ts` formatters, `useSeo` hook (canonical/og/
+twitter/robots, runtime origin — production domain intentionally NOT baked in),
+accessible `Modal`/`ConfirmDialog` primitives, decomposed CartPage (~1118 →
+~640 lines) into `CartItemRow` / `DeliveryOptions` / `BazarPicker` /
+`ShippingAddressFields`, extracted `BazarCard`, `BazarFormModal`, `BazarRow`,
+`PickupBazarInfo`. JSON-LD MusicStore added to index.html. Backend untouched
+this pass; suite still 167 passed.
+
+## 14. Historical sessions (compressed)
 
 ### Email verification (2026-08-15)
 Backend + frontend implement email verification on signup (`User.email_verified`, signed

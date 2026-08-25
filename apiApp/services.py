@@ -14,9 +14,32 @@ logger = logging.getLogger(__name__)
 def _order_email_context(order):
     """Build the template context for the order-created email."""
     amount_str = f"${order.amount:.2f} {order.currency.upper()}"
-    shipped_label = "Enviado a domicilio" if order.shipped_to.lower() == "home" else order.shipped_to
+    _shipped_labels = {
+        "home": "Enviado a domicilio",
+        "bazar": "Recoges en bazar",
+        "store": "Recoges en tienda",
+    }
+    shipped_label = _shipped_labels.get(order.shipped_to.lower(), order.shipped_to)
     tracking = order.shipping_link or "Preparando para envío"
     orders_link = f"{settings.FRONTEND_URL.rstrip('/')}/mis-ordenes"
+
+    # Bazar pickup details (shipped_to == 'bazar'): shown to the customer
+    # and to the store so both know where/when the hand-off happens.
+    pickup_bazar = None
+    bazar = order.pickup_bazar
+    if bazar is not None:
+        try:
+            date_str = bazar.date.strftime("%d/%m/%Y")
+        except Exception:
+            date_str = str(bazar.date)
+        pickup_bazar = {
+            "name": bazar.name,
+            "date_str": date_str,
+            "schedule": bazar.schedule,
+            "address": bazar.address,
+            "google_maps_url": bazar.google_maps_url,
+        }
+
     items = []
     for item in order.order_items.select_related("record"):
         record = item.record
@@ -42,6 +65,7 @@ def _order_email_context(order):
         "orders_link": orders_link,
         "items": items,
         "shipping": order.shipping_details or {},
+        "pickup_bazar": pickup_bazar,
         "customer_email": order.user_email,
         "frontend_url": settings.FRONTEND_URL,
     }
