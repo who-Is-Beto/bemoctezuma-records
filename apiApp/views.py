@@ -88,6 +88,25 @@ def error_response(message, status_code=400, code="error", details=None):
         payload["error"]["details"] = details
     return Response(payload, status=status_code)
 
+def _optimized_cart(cart):
+    """Return a Cart queryset pre-fetched for CartSerializer serialization.
+
+    Avoids N+1 queries: each CartItem -> Record -> Artist/Category/Genere is
+    fetched in bulk.  Accepts a Cart instance or Cart queryset.
+    """
+    if isinstance(cart, Cart):
+        return Cart.objects.filter(pk=cart.pk).prefetch_related(
+            'cart_items__record__artist',
+            'cart_items__record__category',
+            'cart_items__record__genere',
+        ).get(pk=cart.pk)
+    return cart.prefetch_related(
+        'cart_items__record__artist',
+        'cart_items__record__category',
+        'cart_items__record__genere',
+    )
+
+
 def _require_email_verified(request):
     """Block authenticated-but-unverified users from purchasing flows.
 
@@ -610,6 +629,7 @@ def get_cart(request, cart_code):
             .first()
         ) or Cart.objects.create(user=request.user)
 
+    cart = _optimized_cart(cart)
     serializer = CartSerializer(cart)
     return Response(serializer.data)
 
@@ -622,6 +642,7 @@ def get_all_carts(request):
     # Only the requester's carts. This used to be Cart.objects.all(), which
     # handed every client the first cart in the DB — all users shared a cart.
     carts = Cart.objects.filter(user=request.user).order_by('-updated_at')
+    carts = _optimized_cart(carts)
     serializer = CartSerializer(carts, many=True)
     return Response(serializer.data)
 
@@ -631,7 +652,9 @@ def get_all_cart_items(request):
     blocked = _require_email_verified(request)
     if blocked:
         return blocked
-    cart_items = CartItem.objects.all()
+    cart_items = CartItem.objects.select_related(
+        'record__artist', 'record__category', 'record__genere',
+    ).all()
     serializer = CartItemSerializer(cart_items, many=True)
     return Response(serializer.data)
 
@@ -693,6 +716,7 @@ def add_to_cart(request):
     else:
         CartItem.objects.create(cart=cart, record=record, quantity=new_quantity)
 
+    cart = _optimized_cart(cart)
     serializer = CartSerializer(cart)
     return Response(serializer.data)
 
@@ -721,10 +745,10 @@ def update_cart_quantity(request):
             code="stock_insuficiente",
         )
     cartitem.quantity = quantity
-    print('cart_item', cartitem.cart)
     cartitem.save()
 
-    serializer = CartSerializer(cartitem.cart)
+    cart = _optimized_cart(cartitem.cart)
+    serializer = CartSerializer(cart)
     return Response({"data": serializer.data, "message": "Cart updated successfully"})
 
 @api_view(['DELETE'])
@@ -743,7 +767,9 @@ def remove_cart_item(request):
         cart = Cart.objects.get(cart_code=cart_code)
         cart_item = CartItem.objects.get(record_id=record_id, cart=cart)
         cart_item.delete()
-        return Response({"message": "Cart item removed successfully"}, status=200)
+        cart = _optimized_cart(cart)
+        serializer = CartSerializer(cart)
+        return Response(serializer.data, status=200)
     except Cart.DoesNotExist:
         return error_response("Cart not found", status_code=404, code="cart_not_found")
     except CartItem.DoesNotExist:
@@ -759,7 +785,8 @@ def remove_all_cart_items(request):
     try:
         cart = Cart.objects.get(cart_code=cart_code)
         cart.cart_items.all().delete()
-        return Response({"message": "All cart items removed successfully"}, status=200)
+        serializer = CartSerializer(cart)
+        return Response(serializer.data, status=200)
     except Cart.DoesNotExist:
         return error_response("Cart not found", status_code=404, code="cart_not_found")
 
