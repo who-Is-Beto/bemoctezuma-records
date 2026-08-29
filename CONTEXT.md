@@ -41,7 +41,10 @@ Note: the `ecommerceEnv` venv has NO pytest — run with system `python3 -m pyte
   at import time, so `override_settings` is unreliable; `apiApp/views/auth.py` now uses
   `LiveScopedRateThrottle` (re-reads `api_settings.DEFAULT_THROTTLE_RATES` per request,
   identical prod behavior). `apiApp/tests/conftest.py` also clears the cache before/after
-  every test.
+  every test and sets a dummy `ENVIOS_PERROS_TOKEN` (`_shipping_config` fixture) so the
+  shipping tests are hermetic on CI — the real token only lives in the untracked `.env`
+  and shipping without it 502s. Verified: full suite runs green with NO `.env*` files
+  + dummy `DJANGO_SECRET_KEY` (the exact CI conditions).
 
 - `test_emails.py` — verification email tests.
 - `test_verification_gate.py` — cart/checkout/orders gate tests.
@@ -464,6 +467,12 @@ frontend stage on Vercel serves the `stage` branch at `stage.moctezumarecords.co
 custom domain `stage.api.moctezumarecords.com` + DNS; add GH repo secrets
 `RAILWAY_API_TOKEN`/`RAILWAY_PROJECT_ID`; Vercel domain binding + env var on Preview;
 branch-protection `main` requiring the CI checks.
+
+**sync-stage.yml fix (same session):** both jobs lacked `actions/checkout` — `railway up`
+uploads the runner's working directory, so the deploy would have uploaded nothing. The
+`deploy-stage` job now checks out the deployed SHA (`deployment_status` events) or the
+`ref` input (manual dispatch, default `main`). Manual dispatch accepts an optional `ref`
+to test unmerged code on staging against a prod DB copy.
 
 **Lint finding:** the local machine's eslint is pathologically slow (cold FS cache;
 `require('@typescript-eslint/eslint-plugin')` ~5 min cold, ~0.4 s warm — no code bug).

@@ -15,6 +15,15 @@ def _email_test_env(settings):
 
 
 @pytest.fixture(autouse=True)
+def _shipping_config(settings):
+    """The Envíos Perros token normally comes from the untracked local `.env`,
+    which is absent on CI. The shipping tests mock every HTTP call, so a dummy
+    token is safe — without it every shipping endpoint 502s with
+    `shipping_not_configured`."""
+    settings.ENVIOS_PERROS_TOKEN = 'test-token'
+
+
+@pytest.fixture(autouse=True)
 def _clear_throttle_cache():
     """Django's locmem cache persists across tests within the same pytest
     process, so rate-limit counters (password reset / email verify / etc.)

@@ -11,6 +11,11 @@ on:
   deployment_status:
     states: [success]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Ref (branch or SHA) to deploy to staging from
+        required: false
+        default: 'main'
 
 concurrency:
   group: sync-stage-db
@@ -81,6 +86,14 @@ jobs:
     needs: [sync-db]
     if: always() && needs.sync-db.result == 'success'
     steps:
+      # `railway up` uploads the checked-out working directory as the deploy
+      # source, so the repo MUST be cloned first. On a prod deployment_status
+      # event this checks out the exact deployed SHA (code == prod); on a
+      # manual dispatch it checks out the `ref` input (default `main`).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'deployment_status' && (github.event.deployment.sha || github.sha) || inputs.ref }}
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
