@@ -4,7 +4,7 @@
 > project so a fresh agent session can pick up where the last one left off.
 > Conventions live in `AGENTS.md` — this file is the *what we just did* snapshot.
 
-Last updated: 2026-08-24
+Last updated: 2026-08-29
 
 ---
 
@@ -31,10 +31,20 @@ path `~/Documents/Documents - Roberto's MacBook Air/...` (curly `'`, not straigh
 ## 3. Tests
 
 ```bash
-python3 -m pytest apiApp/tests/ -q   # 167 passed (+2 pre-existing throttle flakes)
+python3 -m pytest apiApp/tests/ -q   # 191 passed
 ```
 
 Note: the `ecommerceEnv` venv has NO pytest — run with system `python3 -m pytest`.
+
+- The two old throttle "flakes" (`test_resend_throttled`, `test_request_throttled`)
+  are fixed: DRF's `ScopedRateThrottle` resolves rates from a class attribute frozen
+  at import time, so `override_settings` is unreliable; `apiApp/views/auth.py` now uses
+  `LiveScopedRateThrottle` (re-reads `api_settings.DEFAULT_THROTTLE_RATES` per request,
+  identical prod behavior). `apiApp/tests/conftest.py` also clears the cache before/after
+  every test and sets a dummy `ENVIOS_PERROS_TOKEN` (`_shipping_config` fixture) so the
+  shipping tests are hermetic on CI — the real token only lives in the untracked `.env`
+  and shipping without it 502s. Verified: full suite runs green with NO `.env*` files
+  + dummy `DJANGO_SECRET_KEY` (the exact CI conditions).
 
 - `test_emails.py` — verification email tests.
 - `test_verification_gate.py` — cart/checkout/orders gate tests.
@@ -425,3 +435,73 @@ footgun fixed (`RAILWAY_ENVIRONMENT` guard). Register 500 root-caused to hung SM
 Live prod secrets were pasted into chat twice (2026-08-16). Rotate: `STRIPE_SECRET_KEY`,
 `PG_PASSWORD`, `DJANGO_SECRET_KEY`, `WEBHOOK_SECRET`. Never paste `railway variables`
 output into a chat.
+
+---
+
+## 15. CI/CD: staging pipelines (2026-08-29)
+
+Both repos now have GitHub Actions. **Files created this session (UNCOMMITTED):**
+
+- Backend: `.github/workflows/test.yml` (pytest on PR + push to `main`/`stage`;
+  needs `DJANGO_SECRET_KEY` secret, python 3.12, hermetic mocks).
+- Backend: `.github/workflows/sync-stage.yml` — on every successful Railway prod
+  deploy (`deployment_status` success for env `production`, or manual dispatch):
+  `pg_dump -Fc` from prod → `pg_restore --clean` into staging → `railway up -e staging`
+  (runs `migrate` on the fresh DB copy). Needs `RAILWAY_API_TOKEN` (account token),
+  `RAILWAY_PROJECT_ID`, optional repo var `APP_SERVICE` (default `web`). CLI pinned
+  `@railway/cli@5.2.0` (5.3.x regressed token auth in CI).
+- Frontend: `.github/workflows/test.yml` (`npm ci` + `npm run lint` + `npm run build`,
+  node 22, on PR + push `main`/`stage`).
+
+Backend settings (`bemoctezuna_recordsAPI/settings.py`) now allow the stage origins:
+`ALLOWED_HOSTS` += `stage.api.moctezumarecords.com`, `CSRF_TRUSTED_ORIGINS` +=
+`https://stage.api.moctezumarecords.com` / `https://stage.moctezumarecords.com`,
+`CORS_ALLOWED_ORIGINS` += `https://stage.moctezumarecords.com`.
+
+**Assumptions to confirm with the user:** prod deploys trigger the deploy via Railway's
+GitHub integration (required for `deployment_status`); Railway env named `staging`;
+frontend stage on Vercel serves the `stage` branch at `stage.moctezumarecords.com` with
+`VITE_API_URL=https://stage.api.moctezumarecords.com` for Preview deployments.
+
+**Manual setup still needed (no code):** create Railway `staging` env + Postgres +
+custom domain `stage.api.moctezumarecords.com` + DNS; add GH repo secrets
+`RAILWAY_API_TOKEN`/`RAILWAY_PROJECT_ID`; Vercel domain binding + env var on Preview;
+branch-protection `main` requiring the CI checks.
+
+**sync-stage.yml fix (same session):** both jobs lacked `actions/checkout` — `railway up`
+uploads the runner's working directory, so the deploy would have uploaded nothing. The
+`deploy-stage` job now checks out the deployed SHA (`deployment_status` events) or the
+`ref` input (manual dispatch, default `main`). Manual dispatch accepts an optional `ref`
+to test unmerged code on staging against a prod DB copy.
+
+**Lint finding:** the local machine's eslint is pathologically slow (cold FS cache;
+`require('@typescript-eslint/eslint-plugin')` ~5 min cold, ~0.4 s warm — no code bug).
+CI runners are unaffected.
+
+---
+
+## 8. CI/CD: staging pipeline (2026-08-29)
+
+- New `.github/workflows/test.yml` (UNCOMMITTED): `npm ci` + `npm run lint` + `npm run build`
+  on PR and push to `main`/`stage` (node 22). `main` must be green for merges to make
+  sense — see lint cleanup below.
+- **Lint cleanup (this session):** `npm run lint` was red with 12 errors. Fixed:
+  moved `isHttpUrl` to `src/app/lib/url.ts` (was exported from a component file,
+  `react-refresh/only-export-components`), `VerifyEmailPage` derives its initial
+  error state from the URL instead of a mount `setState`, `useMaintenanceConfig`
+  drops manual `useMemo`/`useCallback` (`react-hooks/preserve-manual-memoization`),
+  `CatalogoPage` `catch (_err)` → `catch {}` + `const` for pagination window vars,
+  and scoped `eslint-disable-next-line react-hooks/set-state-in-effect` comments with
+  justification in `CatalogoPage` (URL⇄state sync bridge), `useShippingQuote` (stale
+  quote guards), `BazarFormModal` (re-seed form on open). **Result: 0 errors, 12
+  warnings** (missing `exhaustive-deps` etc. — warnings don't block). `npm run build`
+  still passes.
+- **Stage env:** Vercel should serve the `stage` branch as the stage site. Manual
+  dashboard steps: (1) domain `stage.moctezumarecords.com` → Preview deployments of
+  branch `stage`; (2) Preview env var `VITE_API_URL=https://stage.api.moctezumarecords.com`
+  (the app reads `API_BASE_URL` → `import.meta.env.VITE_API_URL`; no code change needed).
+- **Local machine quirk:** eslint is pathologically slow on first run here (cold FS
+  cache — `require('@typescript-eslint/eslint-plugin')` ~5 min cold, ~0.4 s warm).
+  Run `node node_modules/eslint/bin/eslint.js .` with a long timeout; CI (node 22,
+  fresh install) is unaffected.
+- Branch protection on `main` should require the frontend CI check (and the backend's).

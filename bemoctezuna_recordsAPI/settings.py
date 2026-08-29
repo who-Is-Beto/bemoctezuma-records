@@ -46,6 +46,7 @@ ALLOWED_HOSTS = [
     "moctezumarecords.com",
     "www.moctezumarecords.com",
     "api.moctezumarecords.com",
+    "stage.api.moctezumarecords.com",
     "http://localhost:5173"
 ]
 
@@ -56,6 +57,8 @@ CSRF_TRUSTED_ORIGINS = [
     "https://moctezumarecords.com",
     "https://www.moctezumarecords.com",
     "https://api.moctezumarecords.com",
+    "https://stage.api.moctezumarecords.com",
+    "https://stage.moctezumarecords.com",
     "https://fe-mocetzuma-records.vercel.app",
     "https://fe-moctezuma-records.vercel.app",
     "https://fe-mocetzuma-records-fecraqq6d-whoisbetos-projects.vercel.app",
@@ -68,9 +71,10 @@ CORS_ALLOWED_ORIGINS = [
     "https://moctezumarecords.com",
     "https://www.moctezumarecords.com",
     "https://api.moctezumarecords.com",
+    "https://stage.moctezumarecords.com",
     "https://fe-mocetzuma-records-fecraqq6d-whoisbetos-projects.vercel.app",
     "https://fe-moctezuma-records.vercel.app",
-    "https://fe-mocetzuma-records.vercel.app",
+    "https://fe-moctezuma-records.vercel.app",
 ]
 CORS_ALLOW_CREDENTIALS = True
 
@@ -120,6 +124,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'apiApp.middleware.MaintenanceModeMiddleware',
 ]
 
 ROOT_URLCONF = 'bemoctezuna_recordsAPI.urls'
@@ -273,6 +278,13 @@ FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 
 # Email verification: set to True to block login until the email is verified.
 REQUIRE_EMAIL_VERIFICATION = os.getenv('REQUIRE_EMAIL_VERIFICATION', 'False').lower() == 'true'
+
+# Default copy for the maintenance window, shown whenever no custom message has
+# been set. Custom messages are stored in SiteConfig and always win.
+MAINTENANCE_DEFAULT_MESSAGE = os.getenv(
+    'MAINTENANCE_DEFAULT_MESSAGE',
+    'Estamos trabajando para darte un mejor servicio.',
+)
 
 DISCOGS_TOKEN = os.getenv('DISCOGS_TOKEN', '')
 
