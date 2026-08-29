@@ -1,0 +1,93 @@
+name: Sync staging DB from production
+
+# Every time a deploy to production completes (Railway GitHub autodeploy fires
+# a `deployment_status` event on the repo), snapshot the production database
+# and restore it into the staging environment, then redeploy staging so its
+# release step (`migrate`) runs against the fresh copy.
+#
+# Can also be run manually (workflow_dispatch) to re-sync the DB at any time.
+
+on:
+  deployment_status:
+    states: [success]
+  workflow_dispatch:
+
+concurrency:
+  group: sync-stage-db
+  cancel-in-progress: false
+
+env:
+  # Account/workspace token (Railway Dashboard → Account Settings → Tokens).
+  # Must be account-scoped, NOT a project token, because this workflow talks
+  # to BOTH the production and staging environments of the same project.
+  RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+  # Railway project ID (Settings → Project ID). Required to target envs without
+  # an interactive `railway link`.
+  RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+  # Name of the web service that holds the PG_* connection vars (created from
+  # the Procfile). Override via GitHub repo variable `APP_SERVICE` if renamed.
+  APP_SERVICE: ${{ vars.APP_SERVICE || 'web' }}
+  PROD_ENV: production
+  STAGE_ENV: staging
+
+jobs:
+  sync-db:
+    name: Copy prod DB → stage DB
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (
+        github.event_name == 'deployment_status'
+        && github.event.deployment_status.state == 'success'
+        && github.event.deployment.environment == 'production'
+      )
+    steps:
+      - name: Install postgres client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Pinned to 5.2.0: 5.3.x regressed non-interactive auth with project
+      # tokens in CI (see Railway Central Station thread 2026-06). Upgrade only
+      # after confirming `railway run`/`railway up` still work in Actions.
+      - name: Install Railway CLI (pinned)
+        run: npm install -g @railway/cli@5.2.0
+
+      - name: Link project
+        run: railway link -p "$RAILWAY_PROJECT_ID" -e "$PROD_ENV" -s "$APP_SERVICE"
+
+      - name: Dump production database
+        # `railway run` injects the service's PG_* vars locally, so pg_dump
+        # connects to prod's public TCP proxy without any secret in CI.
+        run: |
+          railway run -e "$PROD_ENV" -s "$APP_SERVICE" bash -c \
+            'PGPASSWORD="$PG_PASSWORD" pg_dump -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -Fc -f -' \
+            > prod.dump
+
+      - name: Restore into staging database
+        run: |
+          railway link -p "$RAILWAY_PROJECT_ID" -e "$STAGE_ENV" -s "$APP_SERVICE"
+          railway run -e "$STAGE_ENV" -s "$APP_SERVICE" bash -c \
+            'PGPASSWORD="$PG_PASSWORD" pg_restore --no-owner --no-privileges --clean --if-exists -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB"' \
+            < prod.dump
+
+  deploy-stage:
+    name: Redeploy staging (run migrations)
+    runs-on: ubuntu-latest
+    needs: [sync-db]
+    if: always() && needs.sync-db.result == 'success'
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Railway CLI (pinned)
+        run: npm install -g @railway/cli@5.2.0
+
+      - name: Deploy staging service
+        run: |
+          railway up -p "$RAILWAY_PROJECT_ID" -e "$STAGE_ENV" -s "$APP_SERVICE" --ci -m "GitHub Actions: redeploy after prod DB sync"

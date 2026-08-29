@@ -171,7 +171,7 @@ def test_shipping_quote_picks_cheapest_estafeta(api_client, user, cart_with_reco
         _make_quote(courier='Estafeta', total=120),
         _make_quote(courier='Estafeta', total=97.5),
     ]
-    with mock.patch('apiApp.services.requests.post', return_value=FakeResponse(200, quotes)):
+    with mock.patch('apiApp.services.shipping.requests.post', return_value=FakeResponse(200, quotes)):
         resp = api_client.post(
             reverse('shipping-quote'),
             {'cart_code': cart_with_record.cart_code, 'zip': '01000'},
@@ -186,7 +186,7 @@ def test_shipping_quote_picks_cheapest_estafeta(api_client, user, cart_with_reco
 def test_shipping_quote_without_estafeta_returns_404(api_client, user, cart_with_record):
     api_client.force_authenticate(user=user)
     quotes = [_make_quote(courier='DHL', total=150)]
-    with mock.patch('apiApp.services.requests.post', return_value=FakeResponse(200, quotes)):
+    with mock.patch('apiApp.services.shipping.requests.post', return_value=FakeResponse(200, quotes)):
         resp = api_client.post(
             reverse('shipping-quote'),
             {'cart_code': cart_with_record.cart_code, 'zip': '01000'},
@@ -210,7 +210,7 @@ def test_shipping_quote_invalid_zip(api_client, user, cart_with_record):
 def test_shipping_quote_upstream_failure_returns_502(api_client, user, cart_with_record):
     api_client.force_authenticate(user=user)
     with mock.patch(
-        'apiApp.services.requests.post',
+        'apiApp.services.shipping.requests.post',
         side_effect=requests_lib.ConnectionError('boom'),
     ):
         resp = api_client.post(
@@ -299,7 +299,7 @@ def test_shipping_quote_with_real_prod_payload(api_client, user, cart_with_recor
     the unavailable DHL entry is dropped from the list."""
     api_client.force_authenticate(user=user)
     with mock.patch(
-        'apiApp.services.requests.post',
+        'apiApp.services.shipping.requests.post',
         return_value=FakeResponse(200, PROD_RATES_PAYLOAD),
     ):
         resp = api_client.post(
@@ -337,7 +337,7 @@ def _clear_locations_cache():
 def test_shipping_locations_lists_colonias(api_client, user):
     api_client.force_authenticate(user=user)
     with mock.patch(
-        'apiApp.services.requests.get',
+        'apiApp.services.shipping.requests.get',
         return_value=FakeResponse(200, LOCATIONS_PAYLOAD),
     ) as get_mock:
         resp = api_client.get(reverse('shipping-locations'), {'zip': '64000'})
@@ -353,7 +353,7 @@ def test_shipping_locations_lists_colonias(api_client, user):
 def test_shipping_locations_cached(api_client, user):
     api_client.force_authenticate(user=user)
     with mock.patch(
-        'apiApp.services.requests.get',
+        'apiApp.services.shipping.requests.get',
         return_value=FakeResponse(200, LOCATIONS_PAYLOAD),
     ) as get_mock:
         api_client.get(reverse('shipping-locations'), {'zip': '64000'})
@@ -371,7 +371,7 @@ def test_shipping_locations_invalid_zip(api_client, user):
 def test_shipping_locations_unknown_zip_returns_empty(api_client, user):
     api_client.force_authenticate(user=user)
     with mock.patch(
-        'apiApp.services.requests.get',
+        'apiApp.services.shipping.requests.get',
         return_value=FakeResponse(200, []),
     ):
         resp = api_client.get(reverse('shipping-locations'), {'zip': '00000'})
@@ -382,7 +382,7 @@ def test_shipping_locations_unknown_zip_returns_empty(api_client, user):
 def test_shipping_locations_upstream_failure_returns_502(api_client, user):
     api_client.force_authenticate(user=user)
     with mock.patch(
-        'apiApp.services.requests.get',
+        'apiApp.services.shipping.requests.get',
         side_effect=requests_lib.ConnectionError('boom'),
     ):
         resp = api_client.get(reverse('shipping-locations'), {'zip': '64000'})
@@ -488,7 +488,7 @@ def test_admin_update_order_validates_link_length(api_client, admin, db):
 def test_marking_shipped_sends_email(api_client, admin, db):
     order = _make_order(stripe_checkout_session_id='cs_test_ship1')
     api_client.force_authenticate(user=admin)
-    with mock.patch('apiApp.views.send_order_shipped_email') as send_mock:
+    with mock.patch('apiApp.views.admin.send_order_shipped_email') as send_mock:
         resp = api_client.patch(
             reverse('admin-update-order', args=[order.id]),
             {'status': 'shipped', 'shipping_link': 'https://estafeta.com/track/XYZ'},
@@ -509,7 +509,7 @@ def test_link_only_update_on_shipped_order_does_not_resend(api_client, admin, db
         shipping_link='https://estafeta.com/track/OLD',
     )
     api_client.force_authenticate(user=admin)
-    with mock.patch('apiApp.views.send_order_shipped_email') as send_mock:
+    with mock.patch('apiApp.views.admin.send_order_shipped_email') as send_mock:
         resp = api_client.patch(
             reverse('admin-update-order', args=[order.id]),
             {'shipping_link': 'https://estafeta.com/track/NEW'},
@@ -522,7 +522,7 @@ def test_link_only_update_on_shipped_order_does_not_resend(api_client, admin, db
 def test_other_status_changes_do_not_email(api_client, admin, db):
     order = _make_order(stripe_checkout_session_id='cs_test_ship3')
     api_client.force_authenticate(user=admin)
-    with mock.patch('apiApp.views.send_order_shipped_email') as send_mock:
+    with mock.patch('apiApp.views.admin.send_order_shipped_email') as send_mock:
         api_client.patch(
             reverse('admin-update-order', args=[order.id]),
             {'status': 'delivered'},
@@ -559,7 +559,7 @@ def test_checkout_adds_estafeta_line_item(api_client, user, cart_with_record, se
     api_client.force_authenticate(user=user)
     quotes = [_make_quote(courier='Estafeta', total=97.5)]
     fake_session = _fake_stripe_session()
-    with mock.patch('apiApp.views.get_shipping_quotes', return_value=quotes), \
+    with mock.patch('apiApp.views.checkout.get_shipping_quotes', return_value=quotes), \
          mock.patch('stripe.checkout.Session.create', return_value=fake_session) as stripe_create:
         resp = api_client.post(
             reverse('create-checkout-session'),
@@ -585,7 +585,7 @@ def test_checkout_home_blocked_when_no_estafeta(api_client, user, cart_with_reco
     settings.ENVIOS_PERROS_TOKEN = 'test-token'
     api_client.force_authenticate(user=user)
     quotes = [_make_quote(courier='DHL', total=150)]
-    with mock.patch('apiApp.views.get_shipping_quotes', return_value=quotes), \
+    with mock.patch('apiApp.views.checkout.get_shipping_quotes', return_value=quotes), \
          mock.patch('stripe.checkout.Session.create') as stripe_create:
         resp = api_client.post(
             reverse('create-checkout-session'),
@@ -605,7 +605,7 @@ def test_checkout_pickup_skips_quoting(api_client, user, cart_with_record, setti
     settings.ENVIOS_PERROS_TOKEN = 'test-token'
     api_client.force_authenticate(user=user)
     fake_session = _fake_stripe_session()
-    with mock.patch('apiApp.views.get_shipping_quotes') as quote_mock, \
+    with mock.patch('apiApp.views.checkout.get_shipping_quotes') as quote_mock, \
          mock.patch('stripe.checkout.Session.create', return_value=fake_session):
         resp = api_client.post(
             reverse('create-checkout-session'),
@@ -620,7 +620,7 @@ def test_checkout_pickup_skips_quoting(api_client, user, cart_with_record, setti
 
 
 def test_fulfill_checkout_persists_shipping_fields(db, cart_with_record):
-    from apiApp.views import fulfill_checkout
+    from apiApp.services import fulfill_checkout
 
     session = {
         'id': 'cs_test_fulfill',
@@ -680,9 +680,9 @@ def test_artist_search_ignores_punctuation(api_client, trex_record):
 def test_record_search_finds_by_normalized_artist(api_client, zoe_record, trex_record):
     resp = api_client.get('/search/', {'query': 'zoe'})
     assert resp.status_code == 200
-    titles = [r['title'] for r in resp.data]
+    titles = [r['title'] for r in resp.data['results']]
     assert 'Reptilectric' in titles
 
     resp = api_client.get('/search/', {'query': 'trex'})
-    titles = [r['title'] for r in resp.data]
+    titles = [r['title'] for r in resp.data['results']]
     assert 'Electric Warrior' in titles

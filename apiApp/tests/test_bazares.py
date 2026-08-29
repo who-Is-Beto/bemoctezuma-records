@@ -377,7 +377,7 @@ class TestCheckoutBazarGate:
         today = _make_bazar(name='Bazar Hoy', days_ahead=0)
         api_client.force_authenticate(user=user)
         fake_session = _fake_stripe_session()
-        with mock.patch('apiApp.views.get_shipping_quotes') as quote_mock, \
+        with mock.patch('apiApp.views.checkout.get_shipping_quotes') as quote_mock, \
              mock.patch('stripe.checkout.Session.create', return_value=fake_session) as stripe_create:
             resp = self._post_checkout(api_client, cart_with_record, bazar_id=today.id)
         assert resp.status_code == 200, resp.content
@@ -391,7 +391,7 @@ class TestCheckoutBazarGate:
         bazar = _make_bazar(days_ahead=12)
         api_client.force_authenticate(user=user)
         fake_session = _fake_stripe_session()
-        with mock.patch('apiApp.views.get_shipping_quotes') as quote_mock, \
+        with mock.patch('apiApp.views.checkout.get_shipping_quotes') as quote_mock, \
              mock.patch('stripe.checkout.Session.create', return_value=fake_session) as stripe_create:
             resp = self._post_checkout(api_client, cart_with_record, bazar_id=bazar.id)
         assert resp.status_code == 200, resp.content
@@ -419,7 +419,7 @@ class TestCheckoutBazarGate:
 @pytest.mark.django_db
 class TestBazarFulfillment:
     def _fulfill(self, cart, bazar_id=None, session_id='cs_test_fulfill_bazar'):
-        from apiApp.views import fulfill_checkout
+        from apiApp.services import fulfill_checkout
 
         metadata = {
             'cart_code': cart.cart_code,

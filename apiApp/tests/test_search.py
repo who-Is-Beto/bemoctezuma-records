@@ -33,14 +33,32 @@ def catalog(db):
 
 def _search(client, term):
     resp = client.get(reverse('record-search'), {'query': term})
-    if resp.status_code == 404:
-        return []  # view signals "no matches" with 404
     assert resp.status_code == 200
-    return [r['id'] for r in resp.data]
+    return [r['id'] for r in resp.data['results']]
 
 
 def test_search_requires_query(api_client, db):
     assert api_client.get(reverse('record-search')).status_code == 400
+
+
+def test_search_no_matches_is_empty_page(api_client, catalog):
+    """A query with no matches is 200 + an empty paginated envelope, not 404."""
+    resp = api_client.get(reverse('record-search'), {'query': 'zeppelin'})
+    assert resp.status_code == 200
+    assert {'count', 'next', 'previous', 'results'} <= set(resp.data)
+    assert resp.data['count'] == 0
+    assert resp.data['results'] == []
+
+
+def test_search_returns_paginated_envelope(api_client, catalog):
+    """Search responds in the same shape as /records/ (count/results/list...)."""
+    resp = api_client.get(reverse('record-search'), {'query': 'rock'})
+    assert resp.status_code == 200
+    assert resp.data['count'] == 2
+    assert 'next' in resp.data and 'previous' in resp.data
+    ids = [r['id'] for r in resp.data['results']]
+    assert catalog['records'][0].id in ids
+    assert catalog['records'][1].id in ids
 
 
 def test_single_word_matches_title(api_client, catalog):

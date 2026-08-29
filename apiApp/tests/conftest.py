@@ -15,6 +15,18 @@ def _email_test_env(settings):
 
 
 @pytest.fixture(autouse=True)
+def _clear_throttle_cache():
+    """Django's locmem cache persists across tests within the same pytest
+    process, so rate-limit counters (password reset / email verify / etc.)
+    leaked between tests and produced random 429s. Flush before AND after
+    every test so each one starts with a clean throttle window."""
+    from django.core.cache import cache
+    cache.clear()
+    yield
+    cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _local_file_storage(settings):
     """Force FileSystemStorage in tests so uploads land on disk, not R2."""
     settings.STORAGES = {

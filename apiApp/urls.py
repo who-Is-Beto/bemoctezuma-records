@@ -40,6 +40,7 @@ urlpatterns = [
     path('reviews/', views.get_all_reviews, name='get-all-reviews'),
     path('reviews/record/<int:record_id>/', views.get_record_reviews, name='get-record-reviews'),
     path('search/', views.record_search, name='record-search'),
+    path('config/maintenance/', views.maintenance_config, name='maintenance-config'),
     path('discogs/search/', views.discogs_search, name='discogs-search'),
     path('discogs/releases/<int:release_id>/', views.discogs_release_detail, name='discogs-release-detail'),
     path('create-checkout-session/', views.create_stripe_checkout_session, name='create-checkout-session'),
