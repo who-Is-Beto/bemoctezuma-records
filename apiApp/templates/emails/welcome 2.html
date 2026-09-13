@@ -1,0 +1,27 @@
+{% extends "emails/base.html" %}
+
+{% block preheader %}¡Bienvenido a Moctezuma Records!{% endblock %}
+
+{% block content %}
+<div style="text-align:center;">
+    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:8px;">Bienvenido</div>
+    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">¡Hola {{ user_name }}!</div>
+    <div style="color:#4f5b67;font-size:14px;line-height:1.6;">
+        Tu cuenta en Moctezuma Records fue creada con éxito. Nos da muchísimo gusto darte la bienvenida a la familia del vinilo.
+    </div>
+    <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:#fef4e8;text-align:left;">
+        <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:10px;">¿Qué sigue?</div>
+        <div style="color:#0f3a5c;font-size:14px;line-height:1.7;">
+            <div>• Explora nuestro catálogo de discos nuevos y de colección</div>
+            <div>• Descubre lanzamientos exclusivos y ediciones limitadas</div>
+            <div>• Arma tu carrito y recibe tus vinilos en la comodidad de tu hogar</div>
+        </div>
+    </div>
+    <div style="text-align:center;margin:24px 0;">
+        <a href="{{ frontend_url }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f3a5c;color:#ffffff;text-decoration:none;font-weight:700;">Explorar el catálogo</a>
+    </div>
+    <div style="color:#4f5b67;font-size:12px;line-height:1.6;">
+        ¿Necesitas ayuda? Escríbenos a través de <a href="{{ frontend_url }}" style="color:#f08c2c;">moctezumarecords.com</a>.
+    </div>
+</div>
+{% endblock %}

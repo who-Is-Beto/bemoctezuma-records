@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="x-apple-disable-message-reformatting">
+    <title>Moctezuma Records</title>
+</head>
+<body style="margin:0;padding:0;font-family:'Helvetica Neue',Arial,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">
+        {% block preheader %}Moctezuma Records{% endblock %}
+    </div>
+    <div style="background:linear-gradient(135deg,#f7e1b5,#f7c89d,#f7e1b5);padding:24px;">
+        <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:18px;box-shadow:0 8px 30px rgba(0,0,0,0.08);overflow:hidden;">
+            <div style="padding:20px 24px;background:#0f3a5c;text-align:center;">
+                <div style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:2px;">
+                    MOCTEZUMA <span style="color:#f08c2c;">RECORDS</span>
+                </div>
+                <div style="font-size:11px;letter-spacing:1px;color:#f7e1b5;text-transform:uppercase;margin-top:4px;">
+                    Discos de vinilo
+                </div>
+            </div>
+            <div style="padding:24px 24px 12px;">
+                {% block content %}{% endblock %}
+            </div>
+            <div style="padding:16px 24px;background:#0f3a5c;color:#ffffff;font-size:12px;text-align:center;">
+                Moctezuma Records — ¡Gracias por apoyar la música!
+                <div style="margin-top:4px;">
+                    <a href="{{ frontend_url|default:"https://moctezumarecords.com" }}" style="color:#f08c2c;text-decoration:none;">moctezumarecords.com</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

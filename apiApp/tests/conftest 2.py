@@ -1,0 +1,65 @@
+from decimal import Decimal
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.core import mail
+from rest_framework.test import APIClient
+
+from apiApp.models import Order, OrderItem, Record
+
+
+@pytest.fixture(autouse=True)
+def _email_test_env(settings):
+    settings.EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
+    mail.outbox.clear()
+
+
+@pytest.fixture
+def user(db):
+    User = get_user_model()
+    return User.objects.create_user(
+        username='testuser',
+        email='test@example.com',
+        password='OldPass123!',
+    )
+
+
+@pytest.fixture
+def order(db):
+    record = Record.objects.create(
+        title='Vinilo & Cía <b>Test</b>',
+        price=Decimal('100.00'),
+        stock=1,
+    )
+    order = Order.objects.create(
+        stripe_checkout_session_id='cs_test_unique_1',
+        amount=Decimal('100.00'),
+        currency='mxn',
+        user_email='test@example.com',
+        shipped_to='home',
+        shipping_details={
+            "fullName": "<script>alert(1)</script>",
+            "street": "Av 1",
+            "number": "2",
+            "neighborhood": "N",
+            "city": "CDMX",
+            "state": "CDMX",
+            "zip": "01000",
+            "phone": "555",
+            "reference": "x",
+        },
+        ship_link='',
+        status='paid',
+    )
+    order_item = OrderItem.objects.create(
+        order=order,
+        record=record,
+        quantity=2,
+        price=Decimal('100.00'),
+    )
+    return {'order': order, 'record': record, 'order_item': order_item}
+
+
+@pytest.fixture
+def api_client():
+    return APIClient()

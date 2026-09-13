@@ -1,0 +1,27 @@
+{% extends "emails/base.html" %}
+
+{% block preheader %}Confirma tu correo electrónico{% endblock %}
+
+{% block content %}
+<div style="text-align:center;">
+    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:8px;">Verificación</div>
+    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">Confirma tu correo electrónico</div>
+    <div style="color:#4f5b67;font-size:14px;line-height:1.6;">Hola {{ user_name }},</div>
+    <div style="color:#4f5b67;font-size:14px;line-height:1.6;margin-top:8px;">
+        Para terminar de crear tu cuenta en Moctezuma Records necesitamos confirmar que este correo es tuyo.
+        Haz clic en el botón de abajo para verificar tu dirección de correo.
+    </div>
+    <div style="text-align:center;margin:24px 0;">
+        <a href="{{ verification_link }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f3a5c;color:#ffffff;text-decoration:none;font-weight:700;">Confirmar mi correo</a>
+    </div>
+    <div style="color:#4f5b67;font-size:12px;line-height:1.6;">
+        Este enlace expira en {{ expiry_hours }} horas.
+    </div>
+    <div style="color:#4f5b67;font-size:12px;line-height:1.6;margin-top:8px;">
+        Si no creaste una cuenta en Moctezuma Records, ignora este correo.
+    </div>
+    <div style="color:#4f5b67;font-size:12px;line-height:1.6;margin-top:8px;">
+        ¿Necesitas ayuda? Escríbenos a través de <a href="{{ frontend_url }}" style="color:#f08c2c;">moctezumarecords.com</a>.
+    </div>
+</div>
+{% endblock %}
