@@ -44,8 +44,37 @@ El proyecto carga variables de `.env` (producción) y de `.env.local` (desarroll
 
 1. Asegúrate de que Postgres esté corriendo:
 
+   **macOS (Homebrew):**
+
    ```bash
    brew services start postgresql@14
+   ```
+
+   **Linux (systemd — Ubuntu, Debian, Fedora, Arch):**
+
+   ```bash
+   sudo systemctl start postgresql
+   sudo systemctl enable postgresql   # opcional: auto-inicio al arrancar
+   ```
+
+   **Linux (Debian/Ubuntu con `postgresql-14` / init script):**
+
+   ```bash
+   sudo service postgresql start
+   # o por clúster específico:
+   sudo pg_ctlcluster 14 main start
+   ```
+
+   **Docker (alternativa):**
+
+   ```bash
+   docker start <nombre-del-contenedor>   # o: docker compose up -d postgres
+   ```
+
+   Verifica que acepte conexiones antes de seguir:
+
+   ```bash
+   pg_isready -h 127.0.0.1 -p 5432   # → "accepting connections"
    ```
 
 2. Crea el rol y la base de datos (si no existen):
@@ -66,13 +95,55 @@ El proyecto carga variables de `.env` (producción) y de `.env.local` (desarroll
    PG_DB=moctezuma_records_dev
    ```
 
-4. Copia los datos de producción a tu base local (lectura **solo lectura** desde Railway, nunca escribe en prod). Guarda el script como `scripts/copy_prod_to_local.py` o úsalo desde `apiApp`:
+4. Copia los datos de producción a tu base local (lectura **solo lectura** desde Railway, nunca escribe en prod) — el equivalente local del sync prod → stage:
+
+   ```bash
+   python manage.py copy_prod_to_local
+   ```
+
+   El comando verifica que Postgres local esté arriba, corre `migrate` sobre el esquema local y luego copia todo (truncando antes las tablas locales). Pide confirmación antes de vaciar la base — usa `--yes` para saltarla y `--skip-migrate` si el esquema ya está al día.
+
+   Alternativa directa (mismo mecanismo; conecta con las credenciales de `.env` — prod — y restaura en `.env.local`):
 
    ```bash
    python scripts/copy_prod_to_local.py
    ```
 
-   El script conecta con las credenciales de `.env` (prod) y restaura en las de `.env.local` (local), truncando antes las tablas locales. Requiere que el rol local tenga `SUPERUSER` (o que copies por orden de dependencias de FKs).
+### Cómo funciona la copia 🔍
+
+La copia es un **snapshot de la base de datos**: trae las filas de todas las tablas de producción y reemplaza por completo el contenido de tu base local, conservando tu esquema (columnas/migraciones). Producción jamás se toca: la conexión a prod solo hace `SELECT`s.
+
+**Qué se copia y qué no:**
+
+- ✅ Todas las tablas de prod (usuarios, discos, órdenes, carrito, reviews, bazares…).
+- ✅ Solo las columnas **en común** entre prod y local. Si tu esquema local tiene columnas que prod aún no (un cambio sin desplegar), se rellenan con su default; `email_verified` se fuerza a `true` para que la copia no te bloquee el login con el gate de verificación.
+- ❌ **No** se copia `django_migrations`: se conserva el historial de migraciones **local** (el estado aplicado lo decide tu `migrate`, no el de prod).
+- ❌ **No** se copian los archivos de `media/` (imágenes de discos, flyers de bazares…): solo filas de tablas. Los `ImageField`/`FileField` apuntan a rutas locales; si los archivos no existen localmente, las imágenes se ven rotas (los originales viven en Railway/R2).
+
+**Paso a paso del comando `copy_prod_to_local`:**
+
+1. Verifica que existan `.env` (prod) y `.env.local` (local); si falta alguno, aborta con instrucciones.
+2. Intenta conectar al Postgres local con las `PG_*` de `.env.local`. Si está caído, te dice cómo arrancarlo (`brew services start postgresql@14` en macOS, `systemctl` en Linux).
+3. Revisa que el rol local sea `SUPERUSER` (necesario porque el script usa `session_replication_role`); si no lo es, te avisa antes de fallar.
+4. Corre `python manage.py migrate` sobre la base local para que el esquema exista/esté al día — sin esto la copia falla en una base recién creada (no hay tablas que truncar ni dónde insertar). Sáltalo con `--skip-migrate` si tu esquema ya es correcto.
+5. Pide confirmación (salvo `--yes`), porque el siguiente paso **vacía** tu base local.
+6. Ejecuta `scripts/copy_prod_to_local.py` (abajo).
+
+**Paso a paso de `scripts/copy_prod_to_local.py`:**
+
+1. Se conecta a prod (`.env`) y a local (`.env.local`) con `psycopg2`, ambas en `autocommit` (prod solo para leer).
+2. En local ejecuta `SET session_replication_role = replica`: desactiva temporalmente la validación de llaves foráneas para poder insertar en cualquier orden — esto requiere `SUPERUSER`. Si la copia fallara por FKs, la causa sería un rol local sin privilegios.
+3. Lista las tablas de local y hace `TRUNCATE ... CASCADE` de todas menos `django_migrations` (el `CASCADE` arrastra dependencias).
+4. Para cada tabla de prod (orden alfabético): lee sus columnas, hace `SELECT` de todas las filas, corta a las columnas que local comparte e inserta con `executemany` (los valores tipo JSON/array se serializan con el adaptador `Json` de psycopg2).
+5. Reajusta las **secuencias** (`setval` al `MAX(id)` de cada tabla que tenga `id`), para que los próximos inserts no colisionen con los IDs recién copiados.
+6. Regresa la conexión a `session_replication_role = origin` y te imprime el conteo de filas por tabla.
+
+**Casos de uso clásicos:**
+
+- **Base recién creada** (acabas de instalar Postgres): corre los pasos 1–3 y luego `python manage.py copy_prod_to_local` — el comando hace `migrate` y copia en un solo paso.
+- **Refrescar datos viejos** (reproduciste un bug de prod en local): vuelve a correr el mismo comando; trunca y copia de nuevo sin tocar tu esquema.
+- **Solo quieres el esquema, sin data:** `python manage.py migrate` (sin el copy).
+- **Los datos de prod son sensibles:** la copia vive solo en tu máquina (`.env.local` está en `.gitignore`); prod siempre queda intacta.
 
 Migra las bases de datos 💾
 
