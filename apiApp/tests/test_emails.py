@@ -404,9 +404,8 @@ def test_resend_throttled(api_client, user, settings):
 
 @pytest.mark.django_db
 def test_login_returns_email_verified_flag(settings, api_client, user):
-    # The flag-in-response behavior is what's under test here; the login gate
-    # itself is covered by the email_not_verified tests in this file and in
-    # test_verification_gate.py.
+    # The flag-in-response behavior is what's under test here; the purchase
+    # gate (cart/checkout/orders) is covered in test_verification_gate.py.
     settings.REQUIRE_EMAIL_VERIFICATION = False
     resp = api_client.post(
         reverse('auth-login-user'),
@@ -418,15 +417,19 @@ def test_login_returns_email_verified_flag(settings, api_client, user):
 
 
 @pytest.mark.django_db
-def test_login_blocked_when_verification_required(api_client, user, settings):
+def test_login_allowed_when_unverified_and_gate_on(api_client, user, settings):
+    """Login must NOT be blocked by the verification gate — unverified users
+    can sign in and browse; only cart/checkout/orders stay gated (covered in
+    test_verification_gate.py)."""
     settings.REQUIRE_EMAIL_VERIFICATION = True
     resp = api_client.post(
         reverse('auth-login-user'),
         {'username': user.username, 'password': 'OldPass123!'},
         format='json',
     )
-    assert resp.status_code == 403
-    assert resp.json()['error']['code'] == 'email_not_verified'
+    assert resp.status_code == 200
+    assert resp.json()['email_verified'] is False
+    assert 'access' in resp.json()['tokens']
 
 
 @pytest.mark.django_db
