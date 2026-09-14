@@ -57,7 +57,7 @@ class Command(BaseCommand):
 
         if not options["skip_migrate"]:
             self.stdout.write(self.style.MIGRATE_HEADING("Migrando el esquema local…"))
-            call_command("migrate", interactive=False, verbosity=self.verbosity)
+            call_command("migrate", interactive=False, verbosity=options["verbosity"])
 
         self._confirm(options["yes"])
         self._run_copy_script()
