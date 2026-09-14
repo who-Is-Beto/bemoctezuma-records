@@ -196,14 +196,14 @@ Alternativamente, puedes acceder a `/admin/` en Railway (crea un superuser prime
 
 ## Verificación de email ✉️ (2FA por email)
 
-Al registrarse, el backend envía un correo con un enlace de verificación firmado (expira a las 24 h). Si `REQUIRE_EMAIL_VERIFICATION=true`, el usuario **no puede hacer login** hasta confirmar su correo.
+Al registrarse, el backend envía un correo con un enlace de verificación firmado (expira a las 24 h). Si `REQUIRE_EMAIL_VERIFICATION=true`, el usuario puede **iniciar sesión sin verificar** (navegar, explorar el catálogo), pero **no puede usar el flujo de compra** (carrito, checkout, órdenes) hasta confirmar su correo.
 
 ### Endpoints
 
 | Método | URL | Descripción |
 |--------|-----|-------------|
 | `POST` | `/api/auth/register/` | Registro; envía email de bienvenida + enlace de verificación. Respuesta incluye `email_verified`. |
-| `POST` | `/api/auth/login/` | Login; si no está verificado y `REQUIRE_EMAIL_VERIFICATION=true` → `403` con código `email_not_verified`. |
+| `POST` | `/api/auth/login/` | Login; siempre permite entrar (verificado o no). La respuesta incluye `email_verified`. El gate de compra aplica aparte (abajo). |
 | `POST` | `/api/auth/verify-email/` | Body: `{ "uid": "...", "token": "..." }` (los que llegan por query string del enlace). Idempotente. |
 | `POST` | `/api/auth/verify-email/resend/` | Reenvía el enlace (rate-limited a **5/hora** por scope `email_verify`; respuesta genérica para no filtrar si el email existe). |
 
@@ -213,18 +213,18 @@ Al registrarse, el backend envía un correo con un enlace de verificación firma
 2. El enlace apunta a `{FRONTEND_URL}/verificar-correo?uid=...&token=...`.
 3. El frontend llama a `POST /api/auth/verify-email/` con uid/token.
 4. El token se valida con `default_token_generator`; tokens forjados o expirados → `400` con `{ token: ["Invalid or expired verification link"] }`.
-5. `login` verifica `email_verified` cuando el flag está activo.
+5. `login` siempre funciona; la respuesta incluye `email_verified` para que la UI re-sincronice el estado.
 
 ### Gate de compra (cart / checkout / órdenes)
 
-Cuando `REQUIRE_EMAIL_VERIFICATION=true`, el backend también bloquea (además del login) los endpoints de carrito, checkout y órdenes para usuarios autenticados pero sin verificar, devolviendo `403` con `code: "email_not_verified"`:
+Cuando `REQUIRE_EMAIL_VERIFICATION=true`, el backend bloquea los endpoints de carrito, checkout y órdenes para usuarios autenticados pero sin verificar, devolviendo `403` con `code: "email_not_verified"` (el login **no** está bloqueado):
 
 - `GET /carts/`, `GET /carts/<cart_code>/`, `GET /cart-items/`
 - `POST /cart/add/`, `PUT /cart/update/`, `DELETE /cart/remove/`, `DELETE /cart/remove-all/`, `DELETE /cart/delete/`
 - `POST /create-checkout-session/`, `POST /checkout/complete/`
 - `GET /orders/`
 
-Esto cierra la posibilidad de saltarse el bloqueo de la UI llamando la API directamente. El helper `_require_email_verified(request)` en `apiApp/views.py` aplica el guard.
+Esto cierra la posibilidad de saltarse el bloqueo de la UI llamando la API directamente. El helper `_require_email_verified(request)` en `apiApp/views/common.py` aplica el guard.
 
 En desarrollo local, `.env.local` tiene `REQUIRE_EMAIL_VERIFICATION=true` activo, así que el flujo completo (registro → verificar → comprar) se puede probar de punta a punta.
 
@@ -247,7 +247,7 @@ En desarrollo local, `.env.local` tiene `REQUIRE_EMAIL_VERIFICATION=true` activo
 python3 -m pytest apiApp/tests/ -q
 ```
 
-Cobertura de la verificación en `apiApp/tests/test_emails.py` (token forjado, uid inválido, idempotencia, reenvío, throttle 429 y login bloqueado/permitido), del gate de compra en `apiApp/tests/test_verification_gate.py` (carrito, checkout y órdenes bloqueados cuando el usuario no está verificado), de envíos/admin en `test_shipping.py`, búsqueda en `test_search.py`, slugs en `test_slug_generation.py` y bazares en `test_bazares.py`. Suite completa: **167 passed** (+2 flakes conocidos de throttle por aislamiento de caché).
+Cobertura de la verificación en `apiApp/tests/test_emails.py` (token forjado, uid inválido, idempotencia, reenvío, throttle 429 y login permitido con flag en la respuesta), del gate de compra en `apiApp/tests/test_verification_gate.py` (carrito, checkout y órdenes bloqueados cuando el usuario no está verificado), de envíos/admin en `test_shipping.py`, búsqueda en `test_search.py`, slugs en `test_slug_generation.py` y bazares en `test_bazares.py`. Suite completa: **167 passed** (+2 flakes conocidos de throttle por aislamiento de caché).
 
 ## Bazares 🎪 (recoger en bazar)
 

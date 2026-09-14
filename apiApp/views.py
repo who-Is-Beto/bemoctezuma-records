@@ -178,12 +178,6 @@ def login_user(request):
         return error_response("Credenciales inválidas", status_code=401, code="invalid_credentials")
     if not user.is_active:
         return error_response("User is inactive", status_code=403, code="user_inactive")
-    if settings.REQUIRE_EMAIL_VERIFICATION and not user.email_verified:
-        return error_response(
-            "Please verify your email before signing in",
-            status_code=403,
-            code="email_not_verified",
-        )
 
     tokens = _build_token_response(user)
     return Response(
