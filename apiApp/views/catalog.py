@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .common import error_response
+from .common import _require_admin, error_response
 from ..models import Artist, Category, Genere, Record
 from ..pagination import StandardResultsSetPagination
 from ..serilizers import (
@@ -11,6 +11,7 @@ from ..serilizers import (
     CategoryListSerializer,
     CategorySerializer,
     GenereSerializer,
+    RecordAdminSerializer,
     RecordCreateSerializer,
     RecordDetailSerializer,
     RecordListSerializer,
@@ -42,14 +43,14 @@ def record_list(request):
 @permission_classes([IsAuthenticated])
 def record_create(request):
     """Create a new record. Admin only."""
-    if request.user.role != "ADMIN":
-        return error_response("No tienes permiso para realizar esta acción.", status_code=403, code="forbidden")
+    admin_err = _require_admin(request, 'apiApp.add_record')
+    if admin_err:
+        return admin_err
     serializer = RecordCreateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     record = serializer.save()
-    # Return the full detail so the frontend gets nested artist/category/genere
-    detail = RecordDetailSerializer(record)
-    return Response(detail.data, status=201)
+    # Return the full detail (admin view: private fields included)
+    return Response(RecordAdminSerializer(record).data, status=201)
 
 
 @api_view(['GET'])

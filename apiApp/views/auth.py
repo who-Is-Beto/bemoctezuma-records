@@ -208,7 +208,11 @@ def get_me(request):
     session stored before the email-verification feature existed).
     """
     serializer = UserSerializer(request.user)
-    return Response(serializer.data)
+    # Only for the user themself (UserSerializer is also nested in public reviews).
+    return Response({
+        **serializer.data,
+        "permissions": sorted(request.user.get_all_permissions()),
+    })
 
 
 @api_view(['GET'])

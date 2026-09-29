@@ -2,7 +2,8 @@
 
 Business logic grouped by domain: emailing (order emails), shipping
 (Envíos Perros), checkout (Stripe order fulfillment), search (tokenized
-queries) and discogs (release data shaping). This is a pure reorganization —
+queries), discogs (release data shaping) and sales (owner emails for the
+sales registered in Punto de venta). This is a pure reorganization —
 behavior is unchanged.
 """
 
@@ -49,6 +50,7 @@ from .config import (
     get_maintenance_state,
     set_maintenance_state,
 )
+from .sales import commission_rate_for, notify_sale_owners, sales_metrics, split_commission
 
 __all__ = [
     # emailing
@@ -88,4 +90,9 @@ __all__ = [
     # config
     'get_maintenance_state',
     'set_maintenance_state',
+    # sales
+    'commission_rate_for',
+    'notify_sale_owners',
+    'sales_metrics',
+    'split_commission',
 ]

@@ -29,6 +29,9 @@ from .admin import (
     admin_delete_user,
     admin_list_orders,
     admin_list_users,
+    admin_role_detail,
+    admin_roles,
+    admin_roles_catalog,
     admin_update_order,
     admin_update_record,
     admin_update_user,
@@ -92,6 +95,13 @@ from .discogs import (
     discogs_search,
 )
 from .config import maintenance_config
+from .sales import (
+    owner_create,
+    owner_list,
+    sale_create,
+    sales_list,
+    sales_metrics_view,
+)
 
 __all__ = [
     # common helpers (kept for any module importing them from apiApp.views)
@@ -172,4 +182,10 @@ __all__ = [
     'discogs_search',
     # config
     'maintenance_config',
+    # sales
+    'owner_create',
+    'owner_list',
+    'sale_create',
+    'sales_list',
+    'sales_metrics_view',
 ]

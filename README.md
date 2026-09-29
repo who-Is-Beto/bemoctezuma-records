@@ -230,9 +230,9 @@ En desarrollo local, `.env.local` tiene `REQUIRE_EMAIL_VERIFICATION=true` activo
 
 ### Archivos clave
 
-- `apiApp/models.py` → campo `User.email_verified`.
-- `apiApp/views.py` → `verify_email`, `resend_verification_email`, `_build_verification_link`.
-- `apiApp/serilizers.py` → `VerifyEmailSerializer`, `email_verified` en `UserSerializer`.
+- `apiApp/models/user.py` → campo `User.email_verified`.
+- `apiApp/views/auth.py` → `verify_email`, `resend_verification_email`; `_build_verification_link` en `apiApp/views/common.py`.
+- `apiApp/serilizers/user.py` → `VerifyEmailSerializer`, `email_verified` en `UserSerializer`.
 - `apiApp/emails.py` → `send_verification_email` + `apiApp/templates/emails/verify_email.html`.
 - `bemoctezuna_recordsAPI/settings.py` → flag `REQUIRE_EMAIL_VERIFICATION`, throttle `email_verify`.
 
@@ -252,7 +252,7 @@ Cobertura de la verificación en `apiApp/tests/test_emails.py` (token forjado, u
 ## Bazares 🎪 (recoger en bazar)
 
 La tienda participa en bazares/tianguis de discos. El modelo `Bazar`
-(`apiApp/models.py`) guarda nombre, fecha, horario, dirección, link de Google
+(`apiApp/models/bazares.py`) guarda nombre, fecha, horario, dirección, link de Google
 Maps e imagen del flyer (se guarda en `media/bazares/`). El slug se autogenera
 como el resto de los modelos slugeados, pero es **no único** a propósito: los
 eventos recurrentes repiten nombre.

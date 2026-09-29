@@ -4,12 +4,12 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from ..services.config import get_maintenance_state, set_maintenance_state
-from .common import error_response
+from .common import _require_admin, error_response
 
 
 @api_view(["GET", "PATCH"])
 def maintenance_config(request):
-    """GET: public maintenance status. PATCH: update the window (admin only).
+    """GET: public maintenance status. PATCH: update the window (admin or role permission).
 
     The GET side is deliberately public (no token): the storefront reads it at
     boot to decide between the site and the maintenance page, and it must keep
@@ -24,13 +24,17 @@ def maintenance_config(request):
             }
         )
 
-    # PATCH — admins only. Manual check so GET can stay public on the same URL.
-    if not request.user.is_authenticated or request.user.role != "ADMIN":
+    # PATCH — admins, or a role granting change_siteconfig. Manual check so GET
+    # can stay public on the same URL.
+    if not request.user.is_authenticated:
         return error_response(
             "No tienes permiso para realizar esta acción.",
             status_code=403,
             code="forbidden",
         )
+    admin_err = _require_admin(request, 'apiApp.change_siteconfig')
+    if admin_err:
+        return admin_err
 
     mode = request.data.get("maintenance_mode")
     message = request.data.get("maintenance_message", "")
