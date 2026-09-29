@@ -12,6 +12,7 @@ from django.utils.http import urlsafe_base64_encode
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from ..admin_panel import ACCESS
 from ..models import Cart
 
 logger = logging.getLogger(__name__)
@@ -73,9 +74,17 @@ def _require_email_verified(request):
     return None
 
 
-def _require_admin(request):
-    """Return an error Response if the user is not an admin, else None."""
-    if request.user.role != "ADMIN":
+def _require_admin(request, perm=None):
+    """Return an error Response unless the user may perform this admin action, else None.
+
+    ADMINs may do everything. When ``perm`` is given (e.g. ``"apiApp.change_order"``),
+    users whose custom role grants Administración access *and* that permission are
+    allowed too (see ``apiApp/admin_panel.py``). Calls without ``perm`` stay ADMIN-only.
+    """
+    user = request.user
+    if user.role != "ADMIN" and not (
+        perm and user.has_perm(f"apiApp.{ACCESS}") and user.has_perm(perm)
+    ):
         return error_response(
             "No tienes permiso para realizar esta acción.",
             status_code=403,

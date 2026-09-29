@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.http import JsonResponse
 from rest_framework_simplejwt.tokens import AccessToken
 
+from .admin_panel import ACCESS
 from .services.config import get_maintenance_state
 
 User = get_user_model()
@@ -32,8 +33,9 @@ class MaintenanceModeMiddleware:
     """503 every request while the maintenance window is open, except:
 
     - pre-auth and config endpoints (see ``_BYPASS_PREFIXES`` above)
-    - any request carrying a valid ADMIN JWT (admins keep full access and
-      are the ones who can flip the window back off)
+    - any request carrying a valid JWT of someone who can flip the window back
+      off: an ADMIN, or a custom role with Administración access +
+      change_siteconfig (see ``apiApp/admin_panel.py``)
     """
 
     def __init__(self, get_response):
@@ -66,6 +68,11 @@ class MaintenanceModeMiddleware:
         user_id = token.get("user_id")
         if user_id is None:
             return False
-        # Verify the token owner still holds admin rights (one indexed lookup;
-        # only reached while the window is actually open).
-        return User.objects.filter(pk=user_id, role="ADMIN").exists()
+        # Verify the token owner still holds those rights (only reached while
+        # the window is actually open).
+        user = User.objects.filter(pk=user_id).first()
+        if user is None:
+            return False
+        return user.role == "ADMIN" or (
+            user.has_perm(f"apiApp.{ACCESS}") and user.has_perm("apiApp.change_siteconfig")
+        )

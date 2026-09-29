@@ -1,7 +1,8 @@
-"""Catalog serializers: artist, category, genere and record (read/write)."""
+"""Catalog serializers: artist, category, genere, owner and record (read/write)."""
 from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 
-from ..models import Artist, Category, Genere, Record
+from ..models import Artist, Category, Genere, Owner, Record
 
 
 def _normalize_decimal_string(value):
@@ -40,6 +41,26 @@ class GenereSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "slug", "description"]
 
 
+class OwnerSerializer(serializers.ModelSerializer):
+    # Unique regardless of case; stored lowercased (validate_email) so the
+    # same person can't end up as two owners with split sales.
+    email = serializers.EmailField(max_length=254, validators=[UniqueValidator(
+        queryset=Owner.objects.all(), lookup='iexact', message="Ya existe un dueño con ese correo.",
+    )])
+
+    class Meta:
+        model = Owner
+        fields = ['id', 'name', 'email']
+
+    def validate_email(self, value):
+        return value.lower()
+
+
+# Business-internal (margin, last sale price, consignor): only admin
+# responses carry them (RecordAdminSerializer), never the public catalog.
+PRIVATE_RECORD_FIELDS = ['cost_price', 'final_sale_price', 'owner']
+
+
 class RecordDetailSerializer(serializers.ModelSerializer):
     artist = ArtistSerializer(read_only=True)
     category = CategorySerializer(read_only=True)
@@ -48,11 +69,19 @@ class RecordDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Record
-        fields = '__all__'
+        exclude = PRIVATE_RECORD_FIELDS
 
     def get_sell_price(self, obj):
         """Always return the computed price so stale DB values never leak."""
         return str(obj.effective_price)
+
+
+class RecordAdminSerializer(RecordDetailSerializer):
+    """Every field, private ones included: admin responses and the edit form."""
+
+    class Meta(RecordDetailSerializer.Meta):
+        exclude = None
+        fields = '__all__'
 
 
 class RecordListSerializer(serializers.ModelSerializer):
@@ -63,7 +92,7 @@ class RecordListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Record
-        fields = ['id', 'title', 'condition', 'category', 'artist', 'genere', 'cover_image_url', 'price', 'cost_price', 'sell_price', 'final_sale_price', 'discount_porcentage', 'stock', 'slug', 'images']
+        fields = ['id', 'title', 'condition', 'category', 'artist', 'genere', 'cover_image_url', 'price', 'sell_price', 'discount_porcentage', 'stock', 'slug', 'images']
 
     def get_sell_price(self, obj):
         """Always return the computed price so stale DB values never leak."""
@@ -83,7 +112,7 @@ class RecordCreateSerializer(serializers.ModelSerializer):
             'title', 'artist', 'description', 'condition', 'genere',
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'discount_porcentage', 'stock', 'images', 'release_date',
-            'featured', 'items_inside', 'weight_grams', 'category',
+            'featured', 'items_inside', 'weight_grams', 'category', 'owner',
         ]
         extra_kwargs = {
             'price': {'required': True},
@@ -136,6 +165,7 @@ class RecordUpdateSerializer(serializers.ModelSerializer):
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'final_sale_price', 'discount_porcentage', 'stock', 'images',
             'release_date', 'featured', 'items_inside', 'weight_grams', 'category',
+            'owner',
         ]
         extra_kwargs = {
             field: {'required': False}

@@ -67,6 +67,14 @@ class Genere(models.Model):
             self.slug = unique_slug
         super().save(*args, **kwargs)
 
+class Owner(models.Model):
+    """Who a record belongs to. Gets an email every time one of their records sells."""
+    name = models.CharField(max_length=255)
+    email = models.EmailField(unique=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.email})"
+
 class Record(models.Model):
     CONDITIONS = (
         ('M', 'Mint'),
@@ -100,6 +108,8 @@ class Record(models.Model):
     # (LP 300g, 7" 100g, CD 85g).
     weight_grams = models.PositiveIntegerField(blank=True, null=True, validators=[MinValueValidator(0)])
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='records', blank=True, null=True)
+    # Nullable: records created before owners existed (or store stock) have none.
+    owner = models.ForeignKey(Owner, on_delete=models.SET_NULL, related_name='records', blank=True, null=True)
 
     def __str__(self):
         return f"{self.title} by {self.artist}"

@@ -1,5 +1,6 @@
 """Admin-only views: user, record and order management."""
 import logging
+from django.contrib.auth.models import Group
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -11,9 +12,11 @@ from ..serilizers import (
     AdminUserSerializer,
     AdminUserUpdateSerializer,
     OrderSerializer,
-    RecordDetailSerializer,
+    RecordAdminSerializer,
     RecordUpdateSerializer,
+    RoleSerializer,
 )
+from ..admin_panel import ACCESS, ACCESS_LABEL, TABS
 from ..services import send_order_shipped_email
 
 logger = logging.getLogger(__name__)
@@ -25,12 +28,12 @@ logger = logging.getLogger(__name__)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def admin_list_users(request):
-    """List all users. Admin only."""
-    admin_err = _require_admin(request)
+    """List all users. Admin, or a role with the Gestionar usuarios tab."""
+    admin_err = _require_admin(request, 'apiApp.tab_manage_users')
     if admin_err:
         return admin_err
 
-    users = User.objects.all().order_by('-date_joined')
+    users = User.objects.all().order_by('-date_joined').prefetch_related('groups')
     serializer = AdminUserSerializer(users, many=True)
     return Response(serializer.data)
 
@@ -67,8 +70,9 @@ def admin_update_user(request, user_id):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def admin_delete_user(request, user_id):
-    """Delete a user. Admin only. Cannot delete yourself."""
-    admin_err = _require_admin(request)
+    """Delete a user. Admin, or a role with delete_user (non-admin targets only).
+    Cannot delete yourself."""
+    admin_err = _require_admin(request, 'apiApp.delete_user')
     if admin_err:
         return admin_err
 
@@ -76,6 +80,13 @@ def admin_delete_user(request, user_id):
         target_user = User.objects.get(pk=user_id)
     except User.DoesNotExist:
         return error_response("Usuario no encontrado", status_code=404, code="user_not_found")
+
+    if target_user.role == 'ADMIN' and request.user.role != 'ADMIN':
+        return error_response(
+            "Solo un administrador puede eliminar a otro administrador.",
+            status_code=403,
+            code="forbidden",
+        )
 
     if target_user.id == request.user.id:
         return error_response(
@@ -88,14 +99,82 @@ def admin_delete_user(request, user_id):
     return Response({"message": "Usuario eliminado correctamente"}, status=200)
 
 
+# ── Admin: custom roles (Django Groups) ─────────────────────────────────
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_roles_catalog(request):
+    """What a role can grant: Administración access → tabs → per-tab actions. Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    return Response({
+        "access": {"codename": ACCESS, "label": ACCESS_LABEL},
+        "tabs": [
+            {
+                "id": tab_id,
+                "label": label,
+                "codename": tab_perm,
+                "actions": [{"codename": code, "label": text} for code, text in actions],
+            }
+            for tab_id, label, tab_perm, actions in TABS
+        ],
+    })
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def admin_roles(request):
+    """GET lists roles, POST creates one ({name, permissions: [codenames]}). Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    if request.method == 'POST':
+        serializer = RoleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=201)
+
+    roles = Group.objects.all().order_by('name').prefetch_related('permissions')
+    return Response(RoleSerializer(roles, many=True).data)
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def admin_role_detail(request, role_id):
+    """PATCH renames / sets permissions of a role, DELETE removes it. Admin only."""
+    admin_err = _require_admin(request)
+    if admin_err:
+        return admin_err
+
+    role = get_object_or_404(Group, pk=role_id)
+    if request.method == 'DELETE':
+        role.delete()
+        return Response({"message": "Rol eliminado correctamente"}, status=200)
+
+    serializer = RoleSerializer(role, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
+
+
 # ── Admin: record management ────────────────────────────────────────────
 
 
-@api_view(['PATCH'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def admin_update_record(request, record_id):
-    """Update a record (stock, final_sale_price, all fields). Admin only."""
-    admin_err = _require_admin(request)
+    """GET: the full record for the edit form. PATCH: update a record (stock,
+    final_sale_price, all fields). Admin, or a role with change_record.
+
+    The edit form must load from here: list rows lack description / weight /
+    release year / featured / items_inside (and the private fields), and
+    saving a form prefilled from them overwrote those with blanks.
+    """
+    admin_err = _require_admin(request, 'apiApp.change_record')
     if admin_err:
         return admin_err
 
@@ -104,13 +183,13 @@ def admin_update_record(request, record_id):
     except Record.DoesNotExist:
         return error_response("Disco no encontrado", status_code=404, code="record_not_found")
 
-    serializer = RecordUpdateSerializer(record, data=request.data, partial=True)
-    serializer.is_valid(raise_exception=True)
-    serializer.save()
+    if request.method == 'PATCH':
+        serializer = RecordUpdateSerializer(record, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
 
-    # Return full detail so the frontend gets nested artist/category/genere
-    detail = RecordDetailSerializer(record)
-    return Response(detail.data)
+    # Full detail: nested artist/category/genere plus the private fields
+    return Response(RecordAdminSerializer(record).data)
 
 
 @api_view(['DELETE'])
@@ -124,7 +203,7 @@ def admin_delete_record(request, record_id):
     reviews and the rating summary are removed with the record (CASCADE).
     The cover image file on disk is intentionally left in place.
     """
-    admin_err = _require_admin(request)
+    admin_err = _require_admin(request, 'apiApp.delete_record')
     if admin_err:
         return admin_err
 
@@ -148,7 +227,7 @@ def admin_delete_record(request, record_id):
 @permission_classes([IsAuthenticated])
 def admin_list_orders(request):
     """List every order (newest first). Admin only."""
-    admin_err = _require_admin(request)
+    admin_err = _require_admin(request, 'apiApp.tab_manage_orders')
     if admin_err:
         return admin_err
 
@@ -165,7 +244,7 @@ def admin_update_order(request, order_id):
     status must be one of Order.status_choices; shipping_link is a tracking
     URL/code (max 255 chars, empty string clears it).
     """
-    admin_err = _require_admin(request)
+    admin_err = _require_admin(request, 'apiApp.change_order')
     if admin_err:
         return admin_err
 

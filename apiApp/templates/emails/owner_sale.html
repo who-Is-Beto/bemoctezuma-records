@@ -1,0 +1,53 @@
+{% extends "emails/base.html" %}
+
+{% block preheader %}Venta #{{ sale_id }} — {{ total_str }}{% endblock %}
+
+{% block content %}
+<div>
+    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Venta #{{ sale_id }}</div>
+    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">¡Hola, {{ owner_name }}! 🎶</div>
+    <div style="color:#4f5b67;font-size:14px;margin-bottom:12px;">
+        Vendimos {% if items|length > 1 %}estos discos tuyos{% else %}este disco tuyo{% endif %} el {{ sold_at }} (hora de CDMX):
+    </div>
+
+    <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:#fef4e8;">
+        <table style="width:100%;border-collapse:collapse;">
+            <thead>
+                <tr>
+                    <th style="text-align:left;font-size:12px;color:#4f5b67;font-weight:600;padding-bottom:6px;">Disco</th>
+                    <th style="text-align:center;font-size:12px;color:#4f5b67;font-weight:600;padding-bottom:6px;">Cant.</th>
+                    <th style="text-align:right;font-size:12px;color:#4f5b67;font-weight:600;padding-bottom:6px;">Precio</th>
+                    <th style="text-align:right;font-size:12px;color:#4f5b67;font-weight:600;padding-bottom:6px;">Subtotal</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td style="padding:8px 0;color:#0f3a5c;font-weight:600;">
+                        {{ item.title }}
+                        {% if item.artist %}<div style="font-size:12px;color:#4f5b67;font-weight:400;">{{ item.artist }}</div>{% endif %}
+                    </td>
+                    <td style="padding:8px 0;text-align:center;color:#0f3a5c;">{{ item.quantity }}</td>
+                    <td style="padding:8px 0;text-align:right;color:#0f3a5c;">{{ item.price_str }}</td>
+                    <td style="padding:8px 0;text-align:right;color:#0f3a5c;">{{ item.subtotal_str }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;background:#f3f7fa;border-radius:12px;">
+        <tr>
+            <td style="padding:14px 16px;color:#0f3a5c;">
+                {% if payment_method %}<div style="font-size:13px;color:#4f5b67;margin-bottom:8px;">Forma de pago: <strong>{{ payment_method }}</strong></div>{% endif %}
+                {% if has_commission %}
+                <div style="font-size:13px;color:#4f5b67;">Subtotal: {{ gross_str }}</div>
+                <div style="font-size:13px;color:#4f5b67;margin-bottom:8px;">Comisión por tarjeta ({{ commission_rate }}%): −{{ commission_str }}</div>
+                {% endif %}
+                <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;">Total{% if has_commission %} neto{% endif %}</div>
+                <div style="font-size:20px;font-weight:700;">{{ total_str }}</div>
+            </td>
+        </tr>
+    </table>
+</div>
+{% endblock %}

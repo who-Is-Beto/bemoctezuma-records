@@ -1,6 +1,8 @@
+from decimal import Decimal
+
 from django.db import models
 
-from .catalog import Record
+from .catalog import Owner, Record
 
 
 class Order(models.Model):
@@ -45,3 +47,41 @@ class OrderItem(models.Model):
     def __str__(self):
         title = self.record.title if self.record else "(disco eliminado)"
         return f"{self.quantity} x {title} en la orden {self.order.id}"
+
+class Sale(models.Model):
+    """A sale registered by hand in Punto de venta: one ticket, one or more records."""
+    PAYMENT_METHODS = (
+        ('cash', 'Efectivo'),
+        ('card', 'Tarjeta'),
+        ('transfer', 'Transferencia'),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    # Blank only on sales registered before the payment method was recorded.
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, blank=True, default='')
+    # Card commission, % of the whole ticket (0 for cash/transfer).
+    commission_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00'))
+    commission_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    # Items subtotal minus the commission: what the store actually takes in.
+    final_sale_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+
+    def __str__(self):
+        return f"Venta {self.id}"
+
+class SaleItem(models.Model):
+    # record is SET_NULL (like OrderItem) so deleting a record keeps the history.
+    # owner is who owned the record when it sold; PROTECT so history never loses it.
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='items')
+    record = models.ForeignKey(Record, on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items')
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, null=True, blank=True, related_name='sale_items')
+    quantity = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    # This line's share of the ticket commission (proportional to its subtotal).
+    commission_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    email_sent = models.BooleanField(default=False)
+    # Snapshot at sale time so receipts reprint the same after the record changes or is deleted.
+    title = models.CharField(max_length=255, blank=True, default='')
+    artist = models.CharField(max_length=255, blank=True, default='')
+    cover_image_url = models.URLField(max_length=200, blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.quantity} x {self.title or '(disco eliminado)'} en la venta {self.sale_id}"

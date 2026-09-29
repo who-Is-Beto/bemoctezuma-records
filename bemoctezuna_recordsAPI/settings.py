@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+from decimal import Decimal
 import os
 from dotenv import load_dotenv
 
@@ -197,7 +198,10 @@ PASSWORD_RESET_TIMEOUT = 60 * 60 * 24
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# The store's business day (bazar "today", sale dates, email dates). Storage
+# stays UTC (USE_TZ); only local conversions use this. Needs the `tzdata`
+# package on hosts without system zone data (e.g. slim containers).
+TIME_ZONE = 'America/Mexico_City'
 
 USE_I18N = True
 
@@ -274,6 +278,11 @@ STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
 STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET') or os.getenv('WEBHOOK_SECRET')
 WEBHOOK_SECRET = STRIPE_WEBHOOK_SECRET
+# Stripe doesn't report its fee back, so Ventas → Métricas estimates it per online
+# order: (amount × PERCENT% + FIXED MXN) × (1 + VAT%). Defaults: Stripe México standard pricing.
+STRIPE_FEE_PERCENT = Decimal(os.getenv('STRIPE_FEE_PERCENT', '3.6'))
+STRIPE_FEE_FIXED = Decimal(os.getenv('STRIPE_FEE_FIXED', '3.00'))
+STRIPE_FEE_VAT = Decimal(os.getenv('STRIPE_FEE_VAT', '16'))
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 
 # Email verification: set to True to block login until the email is verified.

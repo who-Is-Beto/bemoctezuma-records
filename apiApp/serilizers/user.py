@@ -7,6 +7,9 @@ is exactly one ``UserSerializer`` (with ``role``), which is what all views and
 the nested ``ReviewSerializer`` actually used.
 """
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group, Permission
+
+from ..admin_panel import CODENAMES, normalize_role_codenames
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
@@ -40,22 +43,45 @@ class UserSerializer(serializers.ModelSerializer):
 
 class AdminUserSerializer(serializers.ModelSerializer):
     """Read-only serializer for admin user list."""
+    group_names = serializers.SlugRelatedField(source='groups', many=True, read_only=True, slug_field='name')
+
     class Meta:
         model = get_user_model()
-        fields = ['id', 'username', 'email', 'role', 'is_active', 'email_verified', 'date_joined']
+        fields = ['id', 'username', 'email', 'role', 'is_active', 'email_verified', 'date_joined',
+                  'groups', 'group_names']
 
 
 class AdminUserUpdateSerializer(serializers.ModelSerializer):
     """Writable serializer for admin user updates (PATCH)."""
     class Meta:
         model = get_user_model()
-        fields = ['username', 'email', 'role', 'is_active', 'email_verified']
+        fields = ['username', 'email', 'role', 'is_active', 'email_verified', 'groups']
 
     def validate_role(self, value):
         valid_roles = [r[0] for r in get_user_model().ROLES]
         if value not in valid_roles:
             raise serializers.ValidationError(f"Rol inválido. Opciones: {', '.join(valid_roles)}")
         return value
+
+
+class RoleSerializer(serializers.ModelSerializer):
+    """A custom role: a Django Group granting Administración access, tabs and
+    per-tab actions (codenames from ``apiApp/admin_panel.py``)."""
+    permissions = serializers.SlugRelatedField(
+        many=True,
+        required=False,
+        slug_field='codename',
+        queryset=Permission.objects.filter(content_type__app_label='apiApp', codename__in=CODENAMES),
+    )
+    user_count = serializers.IntegerField(source='user_set.count', read_only=True)
+
+    class Meta:
+        model = Group
+        fields = ['id', 'name', 'permissions', 'user_count']
+
+    def validate_permissions(self, perms):
+        kept = normalize_role_codenames(p.codename for p in perms)
+        return [p for p in perms if p.codename in kept]
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):

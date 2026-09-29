@@ -4,7 +4,7 @@
 > project so a fresh agent session can pick up where the last one left off.
 > Conventions live in `AGENTS.md` — this file is the *what we just did* snapshot.
 
-Last updated: 2026-08-29
+Last updated: 2026-09-25
 
 ---
 
@@ -31,10 +31,10 @@ path `~/Documents/Documents - Roberto's MacBook Air/...` (curly `'`, not straigh
 ## 3. Tests
 
 ```bash
-python3 -m pytest apiApp/tests/ -q   # 191 passed
+python3 -m pytest apiApp/tests/ -q   # 220 passed (2026-09-25)
 ```
 
-Note: the `ecommerceEnv` venv has NO pytest — run with system `python3 -m pytest`.
+Note: the `ecommerceEnv` venv now has pytest (it's in `requirements.txt`).
 
 - The two old throttle "flakes" (`test_resend_throttled`, `test_request_throttled`)
   are fixed: DRF's `ScopedRateThrottle` resolves rates from a class attribute frozen
@@ -62,7 +62,7 @@ Note: the `ecommerceEnv` venv has NO pytest — run with system `python3 -m pyte
 
 ## 4. Key conventions & gotchas
 
-- `apiApp/serilizers.py` is intentionally misspelled; `Genere` model is intentional. Don't "fix".
+- The `apiApp/serilizers/` package is intentionally misspelled; `Genere` model is intentional. Don't "fix".
 - Money is `DecimalField` everywhere; Stripe unit amounts are `int(price * 100)` cents (mxn).
 - FKs to the user model always go through `settings.AUTH_USER_MODEL`.
 - All slugged models (`Category`, `Artist`, `Genere`, `Record`) auto-generate unique slugs
@@ -505,3 +505,88 @@ CI runners are unaffected.
   Run `node node_modules/eslint/bin/eslint.js .` with a long timeout; CI (node 22,
   fresh install) is unaffected.
 - Branch protection on `main` should require the frontend CI check (and the backend's).
+
+---
+
+## 16. Record owners + sales history (2026-09-25)
+
+Built on top of the **uncommitted roles work** on `features/roles` (per-tab
+permissions in `apiApp/admin_panel.py`, migration `0048`). Plan: commit roles,
+then this feature on `features/owners-sales` (0049 depends on 0048).
+
+- **Models:** `Owner(name, email unique)` in `models/catalog.py`; `Record.owner`
+  nullable FK, SET_NULL (existing records = NULL). `Sale` (one ticket, `created_at`)
+  + `SaleItem` (record SET_NULL like OrderItem, owner PROTECT = owner at sale time,
+  `quantity`, unit `price`, `email_sent`) in `models/orders.py`. Migration
+  `0049_owners_and_sales.py` (also adds the `tab_sales` permission to User).
+- **Endpoints** (`views/sales.py`):
+
+  | Method | Path | Auth |
+  |--------|------|------|
+  | `GET` | `/owners/` | any Administración user (record form + Ventas filter) |
+  | `POST` | `/owners/create/` | `add_record` or `change_record`; email unique ignoring case, stored lowercased |
+  | `POST` | `/sales/create/` | `change_record`; `{items:[{record, quantity, price?}]}` → `{sale_id, items, warnings}` |
+  | `GET` | `/sales/` | `tab_sales`; `?date_from&date_to` (YYYY-MM-DD, inclusive, CDMX) `&owner=` → `{results, total}` |
+
+- **Sale flow:** one transaction, all-or-nothing: atomic `stock >= qty` decrement
+  (same guard as `fulfill_checkout`, error code `insufficient_stock`), keeps
+  `final_sale_price` in sync. After commit, `services/sales.py::notify_sale_owners`
+  sends one email per owner with only their records (`emails/owner_sale.html` via
+  `emails.send_email`, i.e. Resend in prod) and sets `email_sent`. A record without
+  owner or a failed email → log line + Spanish `warnings` (UI toast); never undoes the sale.
+- **Store time:** email dates use `timezone.localtime()` and history filters use
+  `__date` lookups, both in `TIME_ZONE` (America/Mexico_City, see fixes below).
+- **Frontend:** Record form owner select + inline "Agregar nuevo dueño"; Gestionar
+  Discos "Vender" is now a multi-record ticket; new Administración tab **Ventas**.
+- `.env.example` created (email vars). Nothing new to set: `RESEND_API_KEY` and
+  `DEFAULT_FROM_EMAIL` already exist in prod.
+- Tests: `apiApp/tests/test_sales.py` (18).
+
+**Fixes found along the way (same day):**
+- **Edit-form data loss (pre-existing):** Gestionar Discos → Editar prefilled from
+  `RecordListSerializer` (no description / weight_grams / release_date / featured /
+  items_inside), so saving wiped them. Now Editar loads the full record from
+  `GET /records/<id>/update/` (the admin update view also answers GET; `change_record`).
+- **Private fields:** `cost_price`, `final_sale_price`, `owner` are excluded from the
+  public serializers (list/detail/search, and cart/wishlist/order payloads that nest
+  `RecordListSerializer`). `RecordAdminSerializer` (all fields) is returned by
+  `record_create` and `admin_update_record`.
+- **Store day:** `TIME_ZONE = 'America/Mexico_City'` (was UTC, so bazar "today" flipped at
+  18:00 CDMX: upcoming list + `bazar_in_past`). Added `tzdata==2026.4` to requirements for
+  hosts without system zone data. API datetimes now carry `-06:00` instead of `Z`
+  (same instants; the frontend parses both).
+- AGENTS.md layout/testing sections rewritten for the package layout + pytest.
+- Deleted the dead pre-split files `apiApp/{models,views,serilizers,services,tests}.py`
+  (the same-named packages shadowed them on import; `tests.py` was the empty startapp
+  stub). README paths now point at the package modules.
+- Tests: `test_record_admin.py` (4) + bazar store-day regression test. Suite **220 passed**.
+
+**Follow-ups (not done):**
+- `/sales/` is unpaginated like `/orders/all/` (the date filter bounds it).
+- DRF/Django built-in messages are English (`LANGUAGE_CODE = 'en-us'`); the frontend
+  now surfaces field errors, so some admin errors show English text.
+
+## 17. POS payment method + commission, receipts, Ventas metrics (2026-09-29)
+
+- **Migration `0050_sale_payment_commission.py`** (not yet applied locally): `Sale` +=
+  `payment_method` (`PAYMENT_METHODS` cash/card/transfer; blank = legacy "Sin registrar"),
+  `commission_rate`, `commission_amount`, `final_sale_price` (subtotal − commission);
+  `SaleItem` += `commission_amount` (line share) + snapshot `title`/`artist`/`cover_image_url`.
+  RunPython backfills legacy sales (final = items subtotal, commission 0) and snapshots.
+- **Commission** (`services/sales.py`): card only, default 4.06 %, editable 0–100;
+  `split_commission` rounds half-up to cents and distributes line shares by largest
+  remainder (never negative, always sums exactly). Owner email shows gross/commission/net.
+- **`POST /sales/create/`** now requires `payment_method` (+ optional `commission_rate`)
+  and returns `{sale_id, sale, warnings}`. **`GET /sales/`** returns tickets
+  `{results: Sale[], totals: {subtotal, commission, net}}`; with `?owner=` tickets keep
+  all items (receipt) but totals count only that owner's lines.
+- **`GET /sales/metrics/`** (`tab_sales`, `?date_from&date_to`): POS + online orders
+  (paid/shipped/delivered). Online gross excludes shipping; online commission is an
+  **estimated** Stripe fee `(amount × STRIPE_FEE_PERCENT + STRIPE_FEE_FIXED) × (1 + STRIPE_FEE_VAT)`
+  (settings/env, defaults 3.6 / 3.00 / 16). Owner rows get prorated commission; online
+  owner = record's *current* owner (orders don't snapshot it).
+- Tests: `test_sales.py` (+5), new `test_sales_metrics.py` (4). Suite **228 passed**.
+- **Tab rename:** "Gestionar discos" → **"Punto de venta"** (`admin_panel.py` label, frontend
+  🏪 tab). Migration `0051_rename_tab_punto_de_venta.py`: AlterModelOptions (permission
+  names are generated from tab labels) + RunPython renaming the stored
+  `tab_manage_records` Permission row (Django never renames existing permissions).

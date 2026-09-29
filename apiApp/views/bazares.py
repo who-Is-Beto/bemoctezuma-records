@@ -22,7 +22,7 @@ def bazar_list(request):
 @permission_classes([IsAuthenticated])
 def admin_list_bazares(request):
     """All bazares (past included), newest first. Admin only."""
-    admin_err = _require_admin(request)
+    admin_err = _require_admin(request, 'apiApp.tab_manage_bazares')
     if admin_err:
         return admin_err
     bazares = Bazar.objects.order_by('-date', '-id')
@@ -34,7 +34,7 @@ def admin_list_bazares(request):
 @permission_classes([IsAuthenticated])
 def bazar_create(request):
     """Create a bazar. Accepts multipart/form-data with an image file. Admin only."""
-    admin_err = _require_admin(request)
+    admin_err = _require_admin(request, 'apiApp.add_bazar')
     if admin_err:
         return admin_err
 
@@ -48,7 +48,7 @@ def bazar_create(request):
 @permission_classes([IsAuthenticated])
 def admin_update_bazar(request, bazar_id):
     """Update a bazar (partial). Admin only."""
-    admin_err = _require_admin(request)
+    admin_err = _require_admin(request, 'apiApp.change_bazar')
     if admin_err:
         return admin_err
 
@@ -68,7 +68,7 @@ def admin_update_bazar(request, bazar_id):
 def admin_delete_bazar(request, bazar_id):
     """Permanently delete a bazar. The image file on disk is left in place,
     mirroring admin_delete_record's behavior. Admin only."""
-    admin_err = _require_admin(request)
+    admin_err = _require_admin(request, 'apiApp.delete_bazar')
     if admin_err:
         return admin_err
 

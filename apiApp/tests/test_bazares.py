@@ -14,10 +14,11 @@ Covered processes:
 - Emails: order-created/notification context includes the pickup details and
   the templates render the "Recoges en bazar" block.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -153,6 +154,14 @@ class TestBazarPublicList:
         assert names == [today.name, near.name, far.name]  # soonest first
         # Today still counts as upcoming (checkout allows pickups later today).
         assert today.name in names
+
+    def test_today_is_store_time_not_utc(self, api_client, db):
+        """At 19:30 in CDMX it's already tomorrow in UTC; today's bazar must stay listed."""
+        evening = datetime(2026, 9, 10, 19, 30, tzinfo=ZoneInfo('America/Mexico_City'))
+        _make_bazar(name='Bazar de hoy', date=evening.date())
+        with mock.patch('django.utils.timezone.now', return_value=evening):
+            resp = api_client.get(reverse('bazar-list'))
+        assert [b['name'] for b in resp.data] == ['Bazar de hoy']
 
     def test_serialized_fields(self, api_client, db):
         _make_bazar()

@@ -1,6 +1,8 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+from ..admin_panel import CUSTOM_PERMISSIONS
+
 
 class User(AbstractUser):
     ROLES = (
@@ -16,6 +18,10 @@ class User(AbstractUser):
     profile_picture_url = models.ImageField(blank=True, null=True)
     email_verified = models.BooleanField(default=False)
     role = models.CharField(max_length=10, choices=ROLES, default='CUSTOMER')
+
+    class Meta:
+        # Administración access + per-tab visibility, granted through custom roles.
+        permissions = CUSTOM_PERMISSIONS
 
     def __str__(self):
         return self.username
