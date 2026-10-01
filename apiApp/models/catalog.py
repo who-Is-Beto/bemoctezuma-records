@@ -87,7 +87,9 @@ class Record(models.Model):
         ('P', 'Poor'),
     )
     title = models.CharField(max_length=255)
-    artist = models.ForeignKey(Artist, on_delete=models.CASCADE, related_name='records', blank=True, null=True)
+    # PROTECT: deleting an artist must go through /artists/<id>/delete/, which
+    # reassigns its records first (CASCADE used to delete them silently).
+    artist = models.ForeignKey(Artist, on_delete=models.PROTECT, related_name='records', blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     condition = models.CharField(max_length=4, choices=CONDITIONS, default='M')
     genere = models.ForeignKey(Genere, on_delete=models.CASCADE, related_name='records', blank=True, null=True)

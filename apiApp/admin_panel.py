@@ -18,6 +18,7 @@ ACCESS_LABEL = 'Acceder a Administración'
 TABS = [
     ('add-record', 'Agregar disco', 'tab_add_record', [
         ('add_record', 'Crear discos'),
+        ('delete_artist', 'Eliminar artistas (reasignando sus discos)'),
     ]),
     ('manage-records', 'Punto de venta', 'tab_manage_records', [
         ('change_record', 'Editar y vender discos'),
