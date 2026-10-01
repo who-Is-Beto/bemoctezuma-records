@@ -17,7 +17,7 @@ from ..serilizers import (
     RecordDetailSerializer,
     RecordListSerializer,
 )
-from ..services import apply_record_filters, most_similar_artist, search_artists
+from ..services import apply_record_filters, find_record_matches, most_similar_artist, search_artists
 
 
 @api_view(['GET'])
@@ -188,6 +188,19 @@ def genere_list(request):
     generes = Genere.objects.all().order_by('name')
     serializer = GenereSerializer(generes, many=True)
     return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def record_matches(request):
+    """Existing records that match ?title= (and ?artist=, a name) of a record
+    being added, so the form can offer editing that one instead. Same title and
+    artist ignoring case/accents/punctuation. Admin, or add_record."""
+    admin_err = _require_admin(request, 'apiApp.add_record')
+    if admin_err:
+        return admin_err
+    matches = find_record_matches(request.query_params.get('title', ''), request.query_params.get('artist', ''))
+    return Response(RecordAdminSerializer(matches, many=True).data)
 
 
 @api_view(['GET'])

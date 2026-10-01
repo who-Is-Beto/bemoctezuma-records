@@ -2,7 +2,7 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import F, Prefetch
+from django.db.models import Prefetch
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -15,7 +15,7 @@ from ..serilizers import (
     SaleSerializer,
     SalesFilterSerializer,
 )
-from ..services import commission_rate_for, notify_sale_owners, sales_metrics, split_commission
+from ..services import commission_rate_for, notify_sale_owners, sales_metrics, split_commission, take_stock
 
 
 @api_view(['GET'])
@@ -47,7 +47,10 @@ def owner_create(request):
 @permission_classes([IsAuthenticated])
 def sale_create(request):
     """Register a sale from Punto de venta:
-    {"items": [{record, quantity, price?}], "payment_method", "commission_rate"?}.
+    {"items": [{record, quantity, price?, owner?}], "payment_method", "commission_rate"?}.
+
+    ``owner`` says whose units are sold; required when several owners have the
+    record in stock (one owner, or store stock, needs none).
 
     Card pays ``commission_rate`` % (default 4.06) of the whole ticket; cash and
     transfer pay none. Each line keeps its proportional share of the commission.
@@ -64,11 +67,11 @@ def sale_create(request):
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
     lines = [
-        (line['record'], line['quantity'], line.get('price', line['record'].effective_price))
+        (line['record'], line['quantity'], line.get('price', line['record'].effective_price), line['owner'])
         for line in data['items']
     ]
     rate = commission_rate_for(data['payment_method'], data.get('commission_rate'))
-    subtotals = [price * quantity for _, quantity, price in lines]
+    subtotals = [price * quantity for _, quantity, price, _ in lines]
     commission, shares = split_commission(subtotals, rate)
 
     with transaction.atomic():
@@ -78,21 +81,24 @@ def sale_create(request):
             commission_amount=commission,
             final_sale_price=sum(subtotals, Decimal('0.00')) - commission,
         )
-        for (record, quantity, price), share in zip(lines, shares):
-            # Same guard as fulfill_checkout: atomic and never below zero.
-            sold = Record.objects.filter(pk=record.pk, stock__gte=quantity).update(
-                stock=F('stock') - quantity, final_sale_price=price,
-            )
-            if not sold:
-                record.refresh_from_db(fields=['stock'])
+        for (record, quantity, price, owner), share in zip(lines, shares):
+            # Same guard as fulfill_checkout: row-locked and never below zero,
+            # taken from the chosen owner's units.
+            if not take_stock(record.pk, quantity, owner_id=owner.pk if owner else None):
+                available = (
+                    record.owner_stock.filter(owner=owner).values_list('quantity', flat=True).first() or 0
+                    if owner else Record.objects.get(pk=record.pk).stock
+                )
                 transaction.set_rollback(True)
                 return error_response(
-                    f'No hay suficiente stock de "{record.title}" (disponible: {record.stock})',
+                    f'No hay suficiente stock de "{record.title}"'
+                    f'{f" de {owner.name}" if owner else ""} (disponible: {available})',
                     status_code=400,
                     code="insufficient_stock",
                 )
+            Record.objects.filter(pk=record.pk).update(final_sale_price=price)
             SaleItem.objects.create(
-                sale=sale, record=record, owner_id=record.owner_id, quantity=quantity, price=price,
+                sale=sale, record=record, owner=owner, quantity=quantity, price=price,
                 commission_amount=share, title=record.title,
                 artist=record.artist.name if record.artist else '',
                 cover_image_url=record.cover_image_url,

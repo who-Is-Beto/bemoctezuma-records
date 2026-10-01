@@ -110,8 +110,6 @@ class Record(models.Model):
     # (LP 300g, 7" 100g, CD 85g).
     weight_grams = models.PositiveIntegerField(blank=True, null=True, validators=[MinValueValidator(0)])
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='records', blank=True, null=True)
-    # Nullable: records created before owners existed (or store stock) have none.
-    owner = models.ForeignKey(Owner, on_delete=models.SET_NULL, related_name='records', blank=True, null=True)
 
     def __str__(self):
         return f"{self.title} by {self.artist}"
@@ -143,3 +141,23 @@ class Record(models.Model):
                 counter += 1
             self.slug = unique_slug
         super().save(*args, **kwargs)
+
+
+class RecordOwner(models.Model):
+    """How many of a record's ``stock`` belong to one owner.
+
+    A record with no rows is store stock. With rows, their quantities add up
+    to ``Record.stock`` (services/inventory.py keeps both in step). Online
+    sales take from the owner whose row is oldest first.
+    """
+    record = models.ForeignKey(Record, on_delete=models.CASCADE, related_name='owner_stock')
+    # PROTECT: an owner who still has records listed can't vanish.
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name='record_stock')
+    quantity = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['record', 'owner'], name='unique_record_owner')]
+
+    def __str__(self):
+        return f"{self.quantity} x {self.record.title} de {self.owner.name}"

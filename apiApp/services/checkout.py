@@ -5,10 +5,10 @@ from decimal import Decimal
 import stripe
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F
 
 from ..models import Bazar, Cart, Order, OrderItem, Record
 from .emailing import send_order_created_email, send_order_notification_email
+from .inventory import take_stock
 
 logger = logging.getLogger(__name__)
 
@@ -150,12 +150,19 @@ def fulfill_checkout(session, cart_code=None):
                     price=item.record.effective_price,
                 )
 
-        # Decrement stock per item, atomically and never below zero.
-        for item in order.order_items.all():
-            updated = Record.objects.filter(id=item.record_id, stock__gte=item.quantity).update(
-                stock=F('stock') - item.quantity
-            )
-            if not updated:
+        # Take stock per item (row-locked, never below zero), oldest owner
+        # first; a line covered by several owners becomes one line per owner.
+        for item in list(order.order_items.all()):
+            splits = take_stock(item.record_id, item.quantity) if item.record_id else None
+            if splits:
+                (item.owner_id, item.quantity), *rest = splits
+                item.save(update_fields=['owner', 'quantity'])
+                for owner_id, quantity in rest:
+                    OrderItem.objects.create(
+                        order=order, record_id=item.record_id, owner_id=owner_id,
+                        quantity=quantity, price=item.price,
+                    )
+            else:
                 logger.warning(
                     "Insufficient stock for record %s (order %s): needed %s",
                     item.record_id,

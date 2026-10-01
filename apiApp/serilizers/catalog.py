@@ -1,8 +1,9 @@
 """Catalog serializers: artist, category, genere, owner and record (read/write)."""
+from django.db import transaction
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
-from ..models import Artist, Category, Genere, Owner, Record
+from ..models import Artist, Category, Genere, Owner, Record, RecordOwner
 
 
 def _normalize_decimal_string(value):
@@ -56,9 +57,85 @@ class OwnerSerializer(serializers.ModelSerializer):
         return value.lower()
 
 
-# Business-internal (margin, last sale price, consignor): only admin
-# responses carry them (RecordAdminSerializer), never the public catalog.
-PRIVATE_RECORD_FIELDS = ['cost_price', 'final_sale_price', 'owner']
+class RecordOwnerSerializer(serializers.ModelSerializer):
+    """How many of the record's stock belong to one owner."""
+    owner = serializers.PrimaryKeyRelatedField(queryset=Owner.objects.all())
+    owner_name = serializers.CharField(source='owner.name', read_only=True)
+    # Optional with a single owner: they get the whole stock.
+    quantity = serializers.IntegerField(min_value=0, required=False)
+
+    class Meta:
+        model = RecordOwner
+        fields = ['owner', 'owner_name', 'quantity']
+
+
+class RecordOwnersMixin(serializers.Serializer):
+    """Writable ``owners: [{owner, quantity}]`` for the record form.
+
+    No owners = store stock. One owner gets the whole stock. Several owners
+    must add up to the stock. Omitting ``owners`` keeps them as they are; a
+    stock change then follows a single owner, and is rejected for several
+    (the form has to say whose units changed).
+    """
+    owners = RecordOwnerSerializer(many=True, required=False)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        stock = attrs.get('stock', self.instance.stock if self.instance else 0)
+        owners = attrs.get('owners')
+        if owners is None:
+            if self.instance is None or 'stock' not in attrs:
+                return attrs
+            current = list(self.instance.owner_stock.select_related('owner'))
+            if len(current) == 1:
+                attrs['owners'] = [{'owner': current[0].owner, 'quantity': stock}]
+            elif current and sum(row.quantity for row in current) != stock:
+                raise serializers.ValidationError(
+                    {'owners': 'El disco tiene varios dueños: indica cuántos son de cada uno.'}
+                )
+            return attrs
+
+        owner_ids = [line['owner'].pk for line in owners]
+        if len(set(owner_ids)) != len(owner_ids):
+            raise serializers.ValidationError({'owners': 'Un dueño aparece más de una vez.'})
+        if len(owners) == 1:
+            owners[0]['quantity'] = stock
+        elif owners:
+            total = sum(line.get('quantity', 0) for line in owners)
+            if total != stock:
+                raise serializers.ValidationError(
+                    {'owners': f'Las cantidades por dueño suman {total}, pero el stock es {stock}.'}
+                )
+        return attrs
+
+    def _save_owners(self, record, owners):
+        if owners is None:
+            return
+        record.owner_stock.exclude(owner__in=[line['owner'] for line in owners]).delete()
+        for line in owners:
+            # update_or_create keeps created_at, i.e. the owner's place in the FIFO.
+            RecordOwner.objects.update_or_create(
+                record=record, owner=line['owner'], defaults={'quantity': line.get('quantity', 0)},
+            )
+
+    def create(self, validated_data):
+        owners = validated_data.pop('owners', None)
+        with transaction.atomic():
+            record = super().create(validated_data)
+            self._save_owners(record, owners)
+        return record
+
+    def update(self, instance, validated_data):
+        owners = validated_data.pop('owners', None)
+        with transaction.atomic():
+            record = super().update(instance, validated_data)
+            self._save_owners(record, owners)
+        return record
+
+
+# Business-internal (margin, last sale price): only admin responses carry
+# them (RecordAdminSerializer, plus the owners), never the public catalog.
+PRIVATE_RECORD_FIELDS = ['cost_price', 'final_sale_price']
 
 
 class RecordDetailSerializer(serializers.ModelSerializer):
@@ -78,6 +155,7 @@ class RecordDetailSerializer(serializers.ModelSerializer):
 
 class RecordAdminSerializer(RecordDetailSerializer):
     """Every field, private ones included: admin responses and the edit form."""
+    owners = RecordOwnerSerializer(source='owner_stock', many=True, read_only=True)
 
     class Meta(RecordDetailSerializer.Meta):
         exclude = None
@@ -99,7 +177,7 @@ class RecordListSerializer(serializers.ModelSerializer):
         return str(obj.effective_price)
 
 
-class RecordCreateSerializer(serializers.ModelSerializer):
+class RecordCreateSerializer(RecordOwnersMixin, serializers.ModelSerializer):
     """Write-only serializer for creating a record via the admin inventory form.
 
     FKs are accepted as plain IDs (not nested objects).
@@ -112,7 +190,7 @@ class RecordCreateSerializer(serializers.ModelSerializer):
             'title', 'artist', 'description', 'condition', 'genere',
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'discount_porcentage', 'stock', 'images', 'release_date',
-            'featured', 'items_inside', 'weight_grams', 'category', 'owner',
+            'featured', 'items_inside', 'weight_grams', 'category', 'owners',
         ]
         extra_kwargs = {
             'price': {'required': True},
@@ -151,7 +229,7 @@ class RecordCreateSerializer(serializers.ModelSerializer):
         return value
 
 
-class RecordUpdateSerializer(serializers.ModelSerializer):
+class RecordUpdateSerializer(RecordOwnersMixin, serializers.ModelSerializer):
     """Writable serializer for admin record updates (PATCH).
 
     FKs are accepted as plain IDs (not nested objects).
@@ -165,7 +243,7 @@ class RecordUpdateSerializer(serializers.ModelSerializer):
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'final_sale_price', 'discount_porcentage', 'stock', 'images',
             'release_date', 'featured', 'items_inside', 'weight_grams', 'category',
-            'owner',
+            'owners',
         ]
         extra_kwargs = {
             field: {'required': False}

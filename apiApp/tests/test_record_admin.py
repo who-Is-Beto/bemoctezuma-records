@@ -5,19 +5,20 @@ import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
-from apiApp.models import Cart, CartItem, Owner, Record
+from apiApp.models import Cart, CartItem, Owner, Record, RecordOwner
 
-PRIVATE = ('cost_price', 'final_sale_price', 'owner')
+PRIVATE = ('cost_price', 'final_sale_price', 'owners')
 
 
 @pytest.fixture
 def record(db):
-    return Record.objects.create(
+    record = Record.objects.create(
         title='Abbey Road', price=Decimal('350.00'), cost_price=Decimal('120.00'),
         final_sale_price=Decimal('300.00'), stock=2, description='Remaster 2019',
         release_date=1969, featured=False, items_inside=2, weight_grams=280,
-        owner=Owner.objects.create(name='Ana', email='ana@example.com'),
     )
+    RecordOwner.objects.create(record=record, owner=Owner.objects.create(name='Ana', email='ana@example.com'), quantity=2)
+    return record
 
 
 @pytest.fixture
@@ -55,7 +56,8 @@ def test_edit_form_gets_the_full_record(admin_client, record):
     data = admin_client.get(f'/records/{record.id}/update/').json()
     assert data['description'] == 'Remaster 2019'
     assert (data['release_date'], data['featured'], data['items_inside'], data['weight_grams']) == (1969, False, 2, 280)
-    assert (data['cost_price'], data['final_sale_price'], data['owner']) == ('120.00', '300.00', record.owner_id)
+    assert (data['cost_price'], data['final_sale_price']) == ('120.00', '300.00')
+    assert [(o['owner_name'], o['quantity']) for o in data['owners']] == [('Ana', 2)]
     assert data['artist'] is None or 'name' in data['artist']  # nested like the public detail
 
 

@@ -41,6 +41,8 @@ class OrderItem(models.Model):
     # historical orders intact (quantity + snapshotted price survive).
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='order_items')
     record = models.ForeignKey(Record, on_delete=models.SET_NULL, null=True, blank=True)
+    # Whose copies were sold (like SaleItem.owner); null = store stock.
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, null=True, blank=True, related_name='order_items')
     quantity = models.PositiveIntegerField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
 
