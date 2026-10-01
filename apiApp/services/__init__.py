@@ -38,6 +38,8 @@ from .search import (
     _query_tokens,
     _record_token_q,
     _slug_contains,
+    apply_record_filters,
+    most_similar_artist,
     search_artists,
     search_records,
 )
@@ -81,6 +83,8 @@ __all__ = [
     '_query_tokens',
     '_record_token_q',
     '_slug_contains',
+    'apply_record_filters',
+    'most_similar_artist',
     'search_artists',
     'search_records',
     # discogs

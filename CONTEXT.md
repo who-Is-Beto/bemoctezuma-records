@@ -590,3 +590,22 @@ then this feature on `features/owners-sales` (0049 depends on 0048).
   🏪 tab). Migration `0051_rename_tab_punto_de_venta.py`: AlterModelOptions (permission
   names are generated from tab labels) + RunPython renaming the stored
   `tab_manage_records` Permission row (Django never renames existing permissions).
+
+## 18. Catalog filters, artist delete, perf (2026-09-30, branch feature/optimization-load)
+
+- **`services/search.py::apply_record_filters`** — shared by `/records/` and `/search/`:
+  `genere`, `artist` (slugs), `condition` (comma list of CONDITIONS codes), `price_min` /
+  `price_max` (inclusive, on `sell_price`), `ordering` (`newest` | `price_asc` | `price_desc`,
+  `-id` tiebreak). Invalid values are ignored (shared URLs never 400). Adds
+  `select_related('artist','category','genere')` — fixes the list N+1 (was ~3 queries/row).
+  `page_size` (existing DRF param, max 100) powers the frontend's 5-item search suggestions.
+- `/records/?artist=` skips the `featured=True` curation (artist page lists everything).
+- **Artist delete:** `GET /artists/<id>/usage/` → `{records_count, suggestion}` (most similar
+  name via stdlib difflib — works on SQLite CI); `DELETE /artists/<id>/delete/` with
+  `{reassign_to}` | `{new_artist_name}` — reassignment + delete in one `transaction.atomic()`
+  (row locked), 409 `artist_in_use` without a target. Perm `apiApp.delete_artist`, listed under
+  the Agregar disco tab in `admin_panel.py` (grantable in Roles).
+- **Migration `0052_alter_record_artist_protect`**: `Record.artist` CASCADE → **PROTECT**
+  (deleting an artist used to silently delete its records). Not applied locally yet.
+- Tests: `test_record_filters.py` (7, incl. query count constant per row),
+  `test_artist_delete.py` (8). Suite **243 passed**.

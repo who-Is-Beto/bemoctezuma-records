@@ -4,7 +4,7 @@ from rest_framework.decorators import api_view
 from .common import error_response
 from ..pagination import StandardResultsSetPagination
 from ..serilizers import RecordListSerializer
-from ..services import search_records
+from ..services import apply_record_filters, search_records
 
 
 @api_view(['GET'])
@@ -26,6 +26,8 @@ def record_search(request):
         category=request.query_params.get('category'),
         available=available,
     )
+    # genere / artist / condition / price range / ordering (+ FK joins)
+    records = apply_record_filters(records, request.query_params)
 
     # Same paginated envelope as /records/ (count/next/previous/results).
     # "No matches" is a valid, empty page — not an error.

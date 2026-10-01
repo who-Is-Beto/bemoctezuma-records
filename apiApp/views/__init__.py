@@ -38,8 +38,10 @@ from .admin import (
 )
 from .catalog import (
     artist_create,
+    artist_delete,
     artist_list,
     artist_search,
+    artist_usage,
     genere_list,
     get_category_detail,
     get_category_list,
@@ -130,8 +132,10 @@ __all__ = [
     'admin_update_user',
     # catalog
     'artist_create',
+    'artist_delete',
     'artist_list',
     'artist_search',
+    'artist_usage',
     'genere_list',
     'get_category_detail',
     'get_category_list',

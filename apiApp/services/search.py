@@ -1,4 +1,6 @@
+import difflib
 import operator
+from decimal import Decimal, InvalidOperation
 from functools import reduce
 
 from django.db.models import Q, Value
@@ -91,3 +93,68 @@ def search_records(query, *, category=None, available=None):
     if available:
         records = records.filter(stock__gt=0)
     return records
+
+
+# ?ordering= values accepted by the catalog endpoints; anything else = newest.
+RECORD_ORDERINGS = {
+    'newest': '-id',
+    'price_asc': 'sell_price',
+    'price_desc': '-sell_price',
+}
+_CONDITION_CODES = {code for code, _ in Record.CONDITIONS}
+
+
+def _decimal_param(value):
+    """'250' / '250.5' / '250,5' -> Decimal; blank or garbage -> None."""
+    try:
+        return Decimal(str(value).strip().replace(',', '.')) if value not in (None, '') else None
+    except InvalidOperation:
+        return None
+
+
+def apply_record_filters(records, params):
+    """Catalog filters shared by /records/ and /search/ (query params).
+
+    genere / artist: slug. condition: comma list of CONDITIONS codes.
+    price_min / price_max: inclusive, on the customer price (sell_price, kept in
+    sync by Record.save()). ordering: newest | price_asc | price_desc.
+    Invalid values are ignored rather than 400ing a shared/bookmarked URL.
+    Also joins the FKs the list serializer nests (1 query instead of 3 per row).
+    """
+    genere = (params.get('genere') or '').strip()
+    if genere:
+        records = records.filter(genere__slug=genere)
+    artist = (params.get('artist') or '').strip()
+    if artist:
+        records = records.filter(artist__slug=artist)
+    conditions = [c for c in (params.get('condition') or '').split(',') if c in _CONDITION_CODES]
+    if conditions:
+        records = records.filter(condition__in=conditions)
+    price_min = _decimal_param(params.get('price_min'))
+    if price_min is not None:
+        records = records.filter(sell_price__gte=price_min)
+    price_max = _decimal_param(params.get('price_max'))
+    if price_max is not None:
+        records = records.filter(sell_price__lte=price_max)
+    ordering = RECORD_ORDERINGS.get(params.get('ordering'), '-id')
+    # '-id' tiebreak keeps pagination stable when prices repeat.
+    return records.select_related('artist', 'category', 'genere').order_by(ordering, '-id')
+
+
+def _norm_name(name):
+    return slugify(name or '').replace('-', '')
+
+
+def most_similar_artist(artist):
+    """The other artist whose normalized name is closest to ``artist``'s, or None.
+
+    Stdlib difflib over every artist: fine for a record store's artist count
+    and works on SQLite (CI) as well as Postgres.
+    """
+    target = _norm_name(artist.name)
+    best, best_score = None, 0.0
+    for candidate in Artist.objects.exclude(pk=artist.pk).only('id', 'name', 'slug'):
+        score = difflib.SequenceMatcher(None, target, _norm_name(candidate.name)).ratio()
+        if score > best_score:
+            best, best_score = candidate, score
+    return best
