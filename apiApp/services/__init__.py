@@ -39,6 +39,7 @@ from .search import (
     _record_token_q,
     _slug_contains,
     apply_record_filters,
+    find_record_matches,
     most_similar_artist,
     search_artists,
     search_records,
@@ -52,6 +53,7 @@ from .config import (
     get_maintenance_state,
     set_maintenance_state,
 )
+from .inventory import take_stock
 from .sales import commission_rate_for, notify_sale_owners, sales_metrics, split_commission
 
 __all__ = [
@@ -84,6 +86,7 @@ __all__ = [
     '_record_token_q',
     '_slug_contains',
     'apply_record_filters',
+    'find_record_matches',
     'most_similar_artist',
     'search_artists',
     'search_records',
@@ -94,6 +97,8 @@ __all__ = [
     # config
     'get_maintenance_state',
     'set_maintenance_state',
+    # inventory
+    'take_stock',
     # sales
     'commission_rate_for',
     'notify_sale_owners',

@@ -151,11 +151,10 @@ def sales_metrics(date_from=None, date_to=None):
     reported apart). Commission is the stored card commission for the point
     of sale and an *estimated* Stripe fee for online orders; online owners
     get the fee share of their lines, the shipping share stays with the store.
-    Online owner = the record's current owner (orders don't snapshot it).
     """
     sales = Sale.objects.prefetch_related('items__owner')
     orders = Order.objects.filter(status__in=ONLINE_SALE_STATUSES).prefetch_related(
-        'order_items__record__artist', 'order_items__record__owner'
+        'order_items__record__artist', 'order_items__owner'
     )
     # __date converts to TIME_ZONE: store days, like the Ventas history.
     if date_from:
@@ -218,7 +217,7 @@ def sales_metrics(date_from=None, date_to=None):
                 record.cover_image_url if record else None,
                 item.quantity, line,
             )
-            add_owner(record.owner if record else None, item.quantity, line, fee * line / order.amount)
+            add_owner(item.owner, item.quantity, line, fee * line / order.amount)
 
     summary = _bucket()
     for bucket in channels.values():

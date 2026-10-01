@@ -609,3 +609,28 @@ then this feature on `features/owners-sales` (0049 depends on 0048).
   (deleting an artist used to silently delete its records). Not applied locally yet.
 - Tests: `test_record_filters.py` (7, incl. query count constant per row),
   `test_artist_delete.py` (8). Suite **243 passed**.
+
+## 19. Several owners per record (2026-10-01, branch feature/multiple-record-owners)
+
+- **`RecordOwner(record, owner, quantity, created_at)`** replaces `Record.owner`. No rows =
+  store stock; one owner gets the whole stock; several must add up to `Record.stock`
+  (validated in `RecordOwnersMixin`, `serilizers/catalog.py`). Records/admin JSON carry
+  `owners: [{owner, owner_name, quantity}]` (admin only). `OrderItem.owner` added (PROTECT).
+- **Migration `0053_record_owner_stock`**: copies `Record.owner` → one RecordOwner with the
+  whole stock, backfills `OrderItem.owner` from the record, then drops `Record.owner`.
+  Reversible (oldest owner goes back). Round-tripped on the local prod copy (0053 → 0052 →
+  0053): 2 records, 1 order line, totals unchanged. Applied locally; prod via Railway deploy.
+- **`services/inventory.py::take_stock`** is the only stock decrement: locks the Record row
+  (`select_for_update`), takes from a given owner (POS) or FIFO by `created_at` (online),
+  remainder = store stock. `fulfill_checkout` splits an order line per owner.
+- **POS**: sale lines take `owner`; required when >1 owner has stock. The ticket sends one
+  line per owner when a record's quantity is split ("¿De quién son los que vendes?").
+- **`GET /records/matches/?title=&artist=`** (`add_record`): the add form's "¿Ya existe este
+  disco?" suggestions → "Editar este" turns the form into that record's editor. Python scan of
+  titles (slugs are unreliable: hand-made, truncated, never renamed); Discogs `(N)` suffix
+  ignored; containment from 4 chars; max 5.
+- Tests: `test_record_owners.py` (13, incl. a real Postgres race for the last copy; skipped on
+  SQLite CI). Suite **257 passed**.
+- Known limits: concurrent admin stock edit vs sale is still last-write-wins; split online
+  orders list the record once per owner in the customer email. 27 pre-existing duplicate slugs
+  still 500 `/records/<slug>/` (MultipleObjectsReturned) — not fixed here.

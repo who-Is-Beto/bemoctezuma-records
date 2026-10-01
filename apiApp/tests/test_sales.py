@@ -17,7 +17,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apiApp.emails import send_email
-from apiApp.models import Artist, Owner, Record, Sale, SaleItem
+from apiApp.models import Artist, Owner, Record, RecordOwner, Sale, SaleItem
 from apiApp.services import split_commission
 
 
@@ -56,10 +56,18 @@ def _owner(name='Ana', email='ana@example.com'):
 
 
 def _record(title='Kind of Blue', stock=3, owner=None, price='200.00', artist='Miles Davis'):
-    return Record.objects.create(
-        title=title, price=Decimal(price), stock=stock, owner=owner,
+    record = Record.objects.create(
+        title=title, price=Decimal(price), stock=stock,
         artist=Artist.objects.get_or_create(name=artist)[0],
     )
+    if owner:
+        RecordOwner.objects.create(record=record, owner=owner, quantity=stock)
+    return record
+
+
+def _owner_of(record):
+    row = record.owner_stock.first()
+    return row.owner if row else None
 
 
 def _sell(client, *lines, payment_method='cash', **extra):
@@ -73,7 +81,7 @@ def _sale_at(when, *lines, **fields):
     Sale.objects.filter(pk=sale.pk).update(created_at=when)  # auto_now_add ignores kwargs
     for record, quantity, price, *commission in lines:
         SaleItem.objects.create(
-            sale=sale, record=record, owner=record.owner, quantity=quantity, price=Decimal(price),
+            sale=sale, record=record, owner=_owner_of(record), quantity=quantity, price=Decimal(price),
             commission_amount=Decimal(commission[0] if commission else '0.00'), title=record.title,
         )
     return sale
@@ -122,27 +130,57 @@ def test_roles_gate_owners_and_sales(db):
 # ── Record ↔ owner ───────────────────────────────────────────────────────
 
 
+def _owners(record):
+    return sorted((row.owner.name, row.quantity) for row in record.owner_stock.select_related('owner'))
+
+
 def test_record_owner_is_set_on_create_and_changed_on_update(admin):
     client = _client(admin)
     ana, beto = _owner(), _owner('Beto', 'beto@example.com')
-    resp = client.post('/records/create/', {'title': 'Abbey Road', 'price': '350.00', 'stock': 1, 'owner': ana.id}, format='json')
+    resp = client.post('/records/create/', {
+        'title': 'Abbey Road', 'price': '350.00', 'stock': 2, 'owners': [{'owner': ana.id}],
+    }, format='json')
     assert resp.status_code == 201
-    assert resp.json()['owner'] == ana.id
+    # A single owner gets the whole stock.
+    assert resp.json()['owners'] == [{'owner': ana.id, 'owner_name': 'Ana', 'quantity': 2}]
     record = Record.objects.get(pk=resp.json()['id'])
-    assert list(ana.records.all()) == [record]
 
-    assert client.patch(f'/records/{record.id}/update/', {'owner': beto.id}, format='json').status_code == 200
-    record.refresh_from_db()
-    assert record.owner == beto
-    client.patch(f'/records/{record.id}/update/', {'owner': None}, format='json')
-    record.refresh_from_db()
-    assert record.owner is None
+    assert client.patch(f'/records/{record.id}/update/', {'owners': [{'owner': beto.id}]}, format='json').status_code == 200
+    assert _owners(record) == [('Beto', 2)]
+    client.patch(f'/records/{record.id}/update/', {'owners': []}, format='json')
+    assert _owners(record) == []
+
+
+def test_several_owners_must_add_up_to_the_stock(admin):
+    client = _client(admin)
+    ana, beto = _owner(), _owner('Beto', 'beto@example.com')
+    body = {'title': 'Kid A', 'price': '900.00', 'stock': 3,
+            'owners': [{'owner': ana.id, 'quantity': 1}, {'owner': beto.id, 'quantity': 1}]}
+    resp = client.post('/records/create/', body, format='json')
+    assert resp.status_code == 400 and 'suman 2' in str(resp.json())
+    body['owners'][1]['quantity'] = 2
+    record = Record.objects.get(pk=client.post('/records/create/', body, format='json').json()['id'])
+    assert _owners(record) == [('Ana', 1), ('Beto', 2)]
+
+    dup = client.patch(f'/records/{record.id}/update/', {'owners': [{'owner': ana.id}, {'owner': ana.id}]}, format='json')
+    assert dup.status_code == 400
+    # A stock change alone can't say whose units changed...
+    assert client.patch(f'/records/{record.id}/update/', {'stock': 4}, format='json').status_code == 400
+    # ...but other edits leave the split alone.
+    assert client.patch(f'/records/{record.id}/update/', {'title': 'Kid A (2000)'}, format='json').status_code == 200
+    assert _owners(record) == [('Ana', 1), ('Beto', 2)]
+
+
+def test_stock_change_follows_a_single_owner(admin):
+    record = _record(stock=2, owner=_owner())
+    assert _client(admin).patch(f'/records/{record.id}/update/', {'stock': 5}, format='json').status_code == 200
+    assert _owners(record) == [('Ana', 5)]
 
 
 def test_records_without_owner_keep_working(api_client, admin):
     record = _record(owner=None)
     assert api_client.get('/records/').status_code == 200
-    assert _client(admin).get(f'/records/{record.id}/update/').json()['owner'] is None
+    assert _client(admin).get(f'/records/{record.id}/update/').json()['owners'] == []
 
 
 # ── Registering sales ────────────────────────────────────────────────────
@@ -377,7 +415,7 @@ def test_migration_backfills_sales_registered_before_payment_methods(admin):
     record.cover_image_url = 'https://img.example.com/kind.jpg'
     record.save()
     legacy = Sale.objects.create()
-    SaleItem.objects.create(sale=legacy, record=record, owner=record.owner, quantity=2, price=Decimal('150.00'))
+    SaleItem.objects.create(sale=legacy, record=record, owner=_owner_of(record), quantity=2, price=Decimal('150.00'))
     SaleItem.objects.create(sale=legacy, record=None, quantity=1, price=Decimal('20.00'))  # record deleted since
     backfill(apps, None)
 

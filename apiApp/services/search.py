@@ -1,5 +1,6 @@
 import difflib
 import operator
+import re
 from decimal import Decimal, InvalidOperation
 from functools import reduce
 
@@ -158,3 +159,40 @@ def most_similar_artist(artist):
         if score > best_score:
             best, best_score = candidate, score
     return best
+
+def find_record_matches(title, artist_name='', limit=5):
+    """Records that may be the same release as one about to be added.
+
+    Titles compare ignoring case, accents and punctuation ('Aztlan' = 'Aztlán');
+    one containing the other also counts ('Kid A' ~ 'Kid A (Remastered)').
+    With an artist (Discogs' ' (2)' disambiguation ignored), only that artist's
+    records, plus exact titles by others. Exact + same artist come first. The
+    add form offers them so stock/owners go to the existing record instead.
+    """
+    norm_title = _normalized_search_term(title)
+    if not norm_title:
+        return []
+    norm_artist = _normalized_search_term(re.sub(r'\s*\(\d+\)$', '', artist_name or ''))
+
+    def similar(other):
+        # Containment only from 4 chars on, so 'Th' doesn't match half the catalog.
+        return min(len(norm_title), len(other)) >= 4 and (norm_title in other or other in norm_title)
+
+    ranked = []
+    # ponytail: scans every title in Python (slugs aren't reliable: hand-made,
+    # truncated, never updated on rename). Fine for thousands of records.
+    for record_id, record_title, record_artist in Record.objects.values_list('id', 'title', 'artist__name'):
+        other = _normalized_search_term(record_title)
+        exact = other == norm_title
+        if not exact and not similar(other):
+            continue
+        same_artist = bool(norm_artist) and _normalized_search_term(record_artist or '') == norm_artist
+        if norm_artist and not same_artist and not exact:
+            continue
+        ranked.append((not (exact and same_artist), not same_artist, not exact, record_id))
+
+    ids = [record_id for *_, record_id in sorted(ranked)[:limit]]
+    records = Record.objects.filter(id__in=ids).select_related('artist', 'category', 'genere').prefetch_related(
+        'owner_stock__owner'
+    ).in_bulk()
+    return [records[record_id] for record_id in ids]

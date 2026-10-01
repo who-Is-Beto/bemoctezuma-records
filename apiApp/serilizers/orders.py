@@ -1,7 +1,7 @@
 """Order and sale serializers."""
 from rest_framework import serializers
 
-from ..models import Order, OrderItem, Record, Sale, SaleItem
+from ..models import Order, OrderItem, Owner, Record, Sale, SaleItem
 from .catalog import OwnerSerializer, RecordListSerializer
 
 
@@ -86,6 +86,24 @@ class SaleLineSerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=1)
     # Unit price; defaults to the record's current (discounted) price.
     price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0, required=False)
+    # Whose copy is sold: required when several owners have the record in stock.
+    owner = serializers.PrimaryKeyRelatedField(queryset=Owner.objects.all(), required=False, allow_null=True)
+
+    def validate(self, line):
+        """Resolve ``owner``: the chosen one, the only one with stock, or None (store stock)."""
+        with_stock = [row.owner for row in line['record'].owner_stock.select_related('owner') if row.quantity > 0]
+        owner = line.get('owner')
+        if owner is None:
+            if len(with_stock) > 1:
+                raise serializers.ValidationError(
+                    {'owner': f'"{line["record"].title}" tiene varios dueños: elige de quién es el que vendes.'}
+                )
+            line['owner'] = with_stock[0] if with_stock else None
+        elif owner not in with_stock:
+            raise serializers.ValidationError(
+                {'owner': f'{owner.name} no tiene "{line["record"].title}" en stock.'}
+            )
+        return line
 
 
 class SaleCreateSerializer(serializers.Serializer):

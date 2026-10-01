@@ -7,7 +7,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
-from apiApp.models import Artist, Order, OrderItem, Owner, Record, Sale, SaleItem
+from apiApp.models import Artist, Order, OrderItem, Owner, Record, RecordOwner, Sale, SaleItem
 from apiApp.services.sales import estimated_stripe_fee
 
 
@@ -27,10 +27,18 @@ def admin_client(db):
 
 
 def _record(title, owner, artist):
-    return Record.objects.create(
-        title=title, price=Decimal('100.00'), stock=10, owner=owner,
+    record = Record.objects.create(
+        title=title, price=Decimal('100.00'), stock=10,
         artist=Artist.objects.get_or_create(name=artist)[0],
     )
+    if owner:
+        RecordOwner.objects.create(record=record, owner=owner, quantity=10)
+    return record
+
+
+def _owner_of(record):
+    row = record.owner_stock.first()
+    return row.owner if row else None
 
 
 def _sale(when, lines, **fields):
@@ -39,7 +47,7 @@ def _sale(when, lines, **fields):
     Sale.objects.filter(pk=sale.pk).update(created_at=when)
     for record, quantity, price, commission in lines:
         SaleItem.objects.create(
-            sale=sale, record=record, owner=record.owner, quantity=quantity, price=Decimal(price),
+            sale=sale, record=record, owner=_owner_of(record), quantity=quantity, price=Decimal(price),
             commission_amount=Decimal(commission), title=record.title,
         )
 
@@ -51,7 +59,7 @@ def _order(when, status, amount, shipping, lines, session):
     )
     Order.objects.filter(pk=order.pk).update(created_at=when)
     for record, quantity, price in lines:
-        OrderItem.objects.create(order=order, record=record, quantity=quantity, price=Decimal(price))
+        OrderItem.objects.create(order=order, record=record, owner=_owner_of(record), quantity=quantity, price=Decimal(price))
 
 
 @pytest.fixture

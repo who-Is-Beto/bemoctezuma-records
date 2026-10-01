@@ -47,6 +47,7 @@ from .catalog import (
     get_category_list,
     record_create,
     record_detail,
+    record_matches,
     record_list,
 )
 from .cart import (
@@ -141,6 +142,7 @@ __all__ = [
     'get_category_list',
     'record_create',
     'record_detail',
+    'record_matches',
     'record_list',
     # cart
     'add_to_cart',
