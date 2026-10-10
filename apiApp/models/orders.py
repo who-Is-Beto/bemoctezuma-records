@@ -45,6 +45,9 @@ class OrderItem(models.Model):
     owner = models.ForeignKey(Owner, on_delete=models.PROTECT, null=True, blank=True, related_name='order_items')
     quantity = models.PositiveIntegerField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    # Unit cost at sale time (Record.cost_price changes or the record is deleted
+    # later): what profit is measured against. 0 = no cost was recorded.
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
     def __str__(self):
         title = self.record.title if self.record else "(disco eliminado)"
@@ -77,6 +80,8 @@ class SaleItem(models.Model):
     owner = models.ForeignKey(Owner, on_delete=models.PROTECT, null=True, blank=True, related_name='sale_items')
     quantity = models.PositiveIntegerField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    # Unit cost at sale time, like OrderItem.cost_price. 0 = no cost was recorded.
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     # This line's share of the ticket commission (proportional to its subtotal).
     commission_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     email_sent = models.BooleanField(default=False)

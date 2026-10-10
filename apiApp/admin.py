@@ -17,8 +17,9 @@ class ArtistAdmin(admin.ModelAdmin):
 admin.site.register(Artist, ArtistAdmin)
 
 class RecordAdmin(admin.ModelAdmin):
-    list_display = ("title", "artist", "genere", "price", "stock", "release_date", "featured")
+    list_display = ("title", "artist", "category", "price", "stock", "release_date", "featured")
     prepopulated_fields = {'slug': ('title',)}
+    filter_horizontal = ('generes',)
 admin.site.register(Record, RecordAdmin)
 
 class CategoryAdmin(admin.ModelAdmin):

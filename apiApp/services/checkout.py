@@ -136,6 +136,7 @@ def fulfill_checkout(session, cart_code=None):
                         record=record,
                         quantity=quantity,
                         price=price,
+                        cost_price=record.cost_price,
                     )
                     created_items = True
         except Exception:
@@ -148,6 +149,7 @@ def fulfill_checkout(session, cart_code=None):
                     record=item.record,
                     quantity=item.quantity,
                     price=item.record.effective_price,
+                    cost_price=item.record.cost_price,
                 )
 
         # Take stock per item (row-locked, never below zero), oldest owner
@@ -160,7 +162,7 @@ def fulfill_checkout(session, cart_code=None):
                 for owner_id, quantity in rest:
                     OrderItem.objects.create(
                         order=order, record_id=item.record_id, owner_id=owner_id,
-                        quantity=quantity, price=item.price,
+                        quantity=quantity, price=item.price, cost_price=item.cost_price,
                     )
             else:
                 logger.warning(

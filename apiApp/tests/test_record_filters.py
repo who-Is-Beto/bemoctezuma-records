@@ -16,11 +16,16 @@ def catalog(db):
     zoe = Artist.objects.create(name='Zoé')
     rock = Genere.objects.create(name='Rock')
     pop = Genere.objects.create(name='Pop')
-    mk = lambda **kw: Record.objects.create(stock=1, featured=True, **kw)  # noqa: E731
+    def mk(generes, **kw):
+        record = Record.objects.create(stock=1, featured=True, **kw)
+        record.generes.set(generes)
+        return record
+
     return {
-        'dark': mk(title='Dark Side', price=Decimal('500'), artist=floyd, genere=rock, condition='NM'),
-        'wall': mk(title='The Wall', price=Decimal('800'), discount_porcentage=50, artist=floyd, genere=rock, condition='VG'),
-        'metro': mk(title='Metrópolis', price=Decimal('300'), artist=zoe, genere=pop, condition='M'),
+        'dark': mk([rock], title='Dark Side', price=Decimal('500'), artist=floyd, condition='NM'),
+        'wall': mk([rock], title='The Wall', price=Decimal('800'), discount_porcentage=50, artist=floyd, condition='VG'),
+        # In two genres: shows up under both, once each.
+        'metro': mk([pop, rock], title='Metrópolis', price=Decimal('300'), artist=zoe, condition='M'),
     }
 
 
@@ -76,6 +81,6 @@ def test_list_query_count_does_not_grow_per_row(api_client, catalog):
     artist = Artist.objects.create(name='Otro')
     genere = Genere.objects.create(name='Jazz')
     for i in range(5):
-        Record.objects.create(title=f'Extra {i}', price=Decimal('100'), stock=1, artist=artist, genere=genere)
-    # artist/genere/category are joined: more rows, same number of queries.
+        Record.objects.create(title=f'Extra {i}', price=Decimal('100'), stock=1, artist=artist).generes.set([genere])
+    # artist/category are joined and generes prefetched: more rows, same number of queries.
     assert _query_count(api_client) == before

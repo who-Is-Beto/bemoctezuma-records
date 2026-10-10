@@ -634,3 +634,23 @@ then this feature on `features/owners-sales` (0049 depends on 0048).
 - Known limits: concurrent admin stock edit vs sale is still last-write-wins; split online
   orders list the record once per owner in the customer email. 27 pre-existing duplicate slugs
   still 500 `/records/<slug>/` (MultipleObjectsReturned) — not fixed here.
+
+## 20. Formats & genres, several genres per record, profit (2026-10-10, branch feature/formats-generes)
+
+- **`Record.generes`** (M2M, `related_name='records'`) replaces the `genere` FK. API: `generes: [{id,name,slug,description}]`
+  on reads, `generes: [ids]` on record create/update. Filters/search go through `_in_generes()` (subquery, so a record in
+  two matching genres comes back once). **Deploy backend + frontend together** (`genere` is gone from the API).
+- **`Record.category` CASCADE → PROTECT.** Formats/genres CRUD: `POST /categories/create/`, `PATCH /categories/<id>/update/`,
+  `DELETE /categories/<id>/delete/` (`{reassign_to}` required when in use → 409 `category_in_use`), and the same for
+  `/generes/` (delete only unlinks its records). Names unique ignoring case; **slug kept on rename** (catalog URLs and
+  shipping weights `cd`/`7` depend on it). `/categories/` and `/generes/` rows carry `records_count`.
+  Perms (`add/change/delete_category`, `add/change/delete_genere`) live under the **Agregar disco** tab in `admin_panel.py`;
+  the UI is the record form's `CatalogPicker` (frontend), no separate tab.
+- **Profit**: `OrderItem.cost_price` / `SaleItem.cost_price` = unit cost saved at sale time (0 = none recorded).
+  Métricas buckets add `cost`, `profit` (= net − cost), `units_without_cost`; `/sales/` tickets add `cost`/`profit`,
+  lines add `cost_price`/`profit`, totals add `cost`/`profit`/`units_without_cost`. The printed receipt shows none of it.
+- **Migration `0054_generes_formats_profit`**: copies each genre into `generes`, backfills line costs from the record's
+  current cost, drops `genere`, PROTECTs `category`. Reversible; round-tripped on the local prod copy (560 record↔genre
+  pairs identical, 563/11/38 records/formats/genres unchanged). Applied locally. Most records have `cost_price = 0`,
+  so profit is overstated until costs are filled in (the UI warns).
+- Tests: `test_formats_generes.py` (9), profit cases in `test_sales_metrics.py` / `test_sales.py`. Suite **269 passed**.

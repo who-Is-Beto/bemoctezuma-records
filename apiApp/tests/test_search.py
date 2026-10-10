@@ -17,12 +17,14 @@ def catalog(db):
 
     dark_side = Record.objects.create(
         title='The Dark Side of the Moon', price=Decimal('500.00'), stock=2,
-        artist=pink, genere=rock, category=lp,
+        artist=pink, category=lp,
     )
+    dark_side.generes.set([rock])
     mtw = Record.objects.create(
         title='Metrópolis', price=Decimal('300.00'), stock=1,
-        artist=zoe, genere=rock, category=cd,
+        artist=zoe, category=cd,
     )
+    mtw.generes.set([rock])
     return {
         'records': [dark_side, mtw],
         'artist': pink,
