@@ -1,5 +1,6 @@
 """Catalog views: records, artists, genres, categories."""
 from django.db import transaction
+from django.db.models import Count
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -9,8 +10,9 @@ from ..models import Artist, Category, Genere, Record
 from ..pagination import StandardResultsSetPagination
 from ..serilizers import (
     ArtistSerializer,
-    CategoryListSerializer,
+    CategoryCountSerializer,
     CategorySerializer,
+    GenereCountSerializer,
     GenereSerializer,
     RecordAdminSerializer,
     RecordCreateSerializer,
@@ -185,9 +187,54 @@ def artist_delete(request, artist_id):
 
 @api_view(['GET'])
 def genere_list(request):
-    generes = Genere.objects.all().order_by('name')
-    serializer = GenereSerializer(generes, many=True)
+    generes = Genere.objects.annotate(records_count=Count('records')).order_by('name')
+    serializer = GenereCountSerializer(generes, many=True)
     return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def genere_create(request):
+    """Create a genre ({name, description?}). Admin / add_genere."""
+    admin_err = _require_admin(request, 'apiApp.add_genere')
+    if admin_err:
+        return admin_err
+    serializer = GenereSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data, status=201)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def genere_update(request, genere_id):
+    """Rename / describe a genre; the slug (catalog URLs) is kept. Admin / change_genere."""
+    admin_err = _require_admin(request, 'apiApp.change_genere')
+    if admin_err:
+        return admin_err
+    genere = Genere.objects.filter(pk=genere_id).first()
+    if genere is None:
+        return error_response("Género no encontrado", status_code=404, code="genere_not_found")
+    serializer = GenereSerializer(genere, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def genere_delete(request, genere_id):
+    """Delete a genre. Its records stay; they just lose this genre (they may
+    keep others). Admin / delete_genere."""
+    admin_err = _require_admin(request, 'apiApp.delete_genere')
+    if admin_err:
+        return admin_err
+    genere = Genere.objects.filter(pk=genere_id).first()
+    if genere is None:
+        return error_response("Género no encontrado", status_code=404, code="genere_not_found")
+    count = genere.records.count()
+    genere.delete()
+    return Response({'deleted': genere_id, 'records_count': count})
 
 
 @api_view(['GET'])
@@ -216,9 +263,83 @@ def record_detail(_, slug):
 
 @api_view(['GET'])
 def get_category_list(_):
-    categories = Category.objects.all()
-    serializer = CategoryListSerializer(categories, many=True)
+    categories = Category.objects.annotate(records_count=Count('records')).order_by('id')
+    serializer = CategoryCountSerializer(categories, many=True)
     return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def category_create(request):
+    """Create a format ({name, description?, image_url?}). Admin / add_category."""
+    admin_err = _require_admin(request, 'apiApp.add_category')
+    if admin_err:
+        return admin_err
+    serializer = CategorySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data, status=201)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def category_update(request, category_id):
+    """Rename / describe a format. The slug is kept: catalog URLs and shipping
+    weights ('cd' / '7') depend on it. Admin / change_category."""
+    admin_err = _require_admin(request, 'apiApp.change_category')
+    if admin_err:
+        return admin_err
+    category = Category.objects.filter(pk=category_id).first()
+    if category is None:
+        return error_response("Formato no encontrado", status_code=404, code="category_not_found")
+    serializer = CategorySerializer(category, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def category_delete(request, category_id):
+    """Delete a format. Admin / delete_category.
+
+    Records using it must go somewhere: ``{"reassign_to": <format id>}``
+    moves them and deletes in one transaction; without it -> 409
+    ``category_in_use`` (Record.category is PROTECT, so nothing is lost).
+    """
+    admin_err = _require_admin(request, 'apiApp.delete_category')
+    if admin_err:
+        return admin_err
+    reassign_to = request.data.get('reassign_to')
+
+    with transaction.atomic():
+        # Locked so a record saved meanwhile can't slip in between the count and the delete.
+        category = Category.objects.select_for_update().filter(pk=category_id).first()
+        if category is None:
+            return error_response("Formato no encontrado", status_code=404, code="category_not_found")
+        records = category.records.all()
+        count = records.count()
+        target = None
+        if count:
+            if reassign_to in (None, ''):
+                return error_response(
+                    f"{count} disco(s) usan este formato; elige a cuál moverlos.",
+                    status_code=409, code="category_in_use",
+                )
+            try:
+                target = Category.objects.get(pk=int(reassign_to))
+            except (Category.DoesNotExist, TypeError, ValueError):
+                return error_response("Formato destino no encontrado", status_code=400, code="invalid_reassign_target")
+            if target.pk == category.pk:
+                return error_response("No puedes mover los discos al mismo formato", status_code=400, code="invalid_reassign_target")
+            records.update(category=target)
+        category.delete()
+
+    return Response({
+        'deleted': category_id,
+        'reassigned': count,
+        'reassigned_to': CategorySerializer(target).data if target else None,
+    })
 
 
 @api_view(['GET'])

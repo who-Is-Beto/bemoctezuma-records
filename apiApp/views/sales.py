@@ -99,6 +99,7 @@ def sale_create(request):
             Record.objects.filter(pk=record.pk).update(final_sale_price=price)
             SaleItem.objects.create(
                 sale=sale, record=record, owner=owner, quantity=quantity, price=price,
+                cost_price=record.cost_price,
                 commission_amount=share, title=record.title,
                 artist=record.artist.name if record.artist else '',
                 cover_image_url=record.cover_image_url,
@@ -151,12 +152,17 @@ def sales_list(request):
     # ponytail: unpaginated like /orders/all/; the date filter bounds it. Paginate if it gets slow.
     subtotal = sum((item.price * item.quantity for item in items), Decimal('0.00'))
     commission = sum((item.commission_amount for item in items), Decimal('0.00'))
+    cost = sum((item.cost_price * item.quantity for item in items), Decimal('0.00'))
     return Response({
         'results': SaleSerializer(sales, many=True).data,
         'totals': {
             'subtotal': str(subtotal),
             'commission': str(commission),
             'net': str(subtotal - commission),
+            # Profit = net - cost saved at sale time; lines with cost 0 had none recorded.
+            'cost': str(cost),
+            'profit': str(subtotal - commission - cost),
+            'units_without_cost': sum(item.quantity for item in items if not item.cost_price),
         },
     })
 

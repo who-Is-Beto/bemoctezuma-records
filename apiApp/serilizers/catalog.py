@@ -24,10 +24,26 @@ class ArtistSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'slug']
 
 
+def _unique_name(model, label):
+    # Same name ignoring case would be two "Rock" chips in the catalog filter.
+    return UniqueValidator(
+        queryset=model.objects.all(), lookup='iexact', message=f"Ya existe un {label} con ese nombre.",
+    )
+
+
 class CategorySerializer(serializers.ModelSerializer):
+    """A format (LP, 7", CD...). Also the admin write serializer: the slug is
+    set once from the first name and kept on rename, because catalog URLs and
+    shipping weights (slug 'cd' / '7') depend on it."""
+    name = serializers.CharField(max_length=100, validators=[_unique_name(Category, 'formato')])
+
     class Meta:
         model = Category
         fields = '__all__'
+        read_only_fields = ['slug']
+
+    def validate_name(self, value):
+        return value.strip()
 
 
 class CategoryListSerializer(serializers.ModelSerializer):
@@ -37,9 +53,32 @@ class CategoryListSerializer(serializers.ModelSerializer):
 
 
 class GenereSerializer(serializers.ModelSerializer):
+    """Read and admin write; like formats, the slug is kept on rename."""
+    name = serializers.CharField(max_length=100, validators=[_unique_name(Genere, 'género')])
+
     class Meta:
         model = Genere
         fields = ["id", "name", "slug", "description"]
+        read_only_fields = ['slug']
+
+    def validate_name(self, value):
+        return value.strip()
+
+
+class CategoryCountSerializer(CategoryListSerializer):
+    """/categories/ rows: how many records use each format."""
+    records_count = serializers.IntegerField(read_only=True)
+
+    class Meta(CategoryListSerializer.Meta):
+        fields = CategoryListSerializer.Meta.fields + ['records_count']
+
+
+class GenereCountSerializer(GenereSerializer):
+    """/generes/ rows: how many records are in each genre."""
+    records_count = serializers.IntegerField(read_only=True)
+
+    class Meta(GenereSerializer.Meta):
+        fields = GenereSerializer.Meta.fields + ['records_count']
 
 
 class OwnerSerializer(serializers.ModelSerializer):
@@ -141,7 +180,7 @@ PRIVATE_RECORD_FIELDS = ['cost_price', 'final_sale_price']
 class RecordDetailSerializer(serializers.ModelSerializer):
     artist = ArtistSerializer(read_only=True)
     category = CategorySerializer(read_only=True)
-    genere = GenereSerializer(read_only=True)
+    generes = GenereSerializer(many=True, read_only=True)
     sell_price = serializers.SerializerMethodField()
 
     class Meta:
@@ -165,12 +204,12 @@ class RecordAdminSerializer(RecordDetailSerializer):
 class RecordListSerializer(serializers.ModelSerializer):
     artist = ArtistSerializer(read_only=True)
     category = CategoryListSerializer(read_only=True)
-    genere = GenereSerializer(read_only=True)
+    generes = GenereSerializer(many=True, read_only=True)
     sell_price = serializers.SerializerMethodField()
 
     class Meta:
         model = Record
-        fields = ['id', 'title', 'condition', 'category', 'artist', 'genere', 'cover_image_url', 'price', 'sell_price', 'discount_porcentage', 'stock', 'slug', 'images']
+        fields = ['id', 'title', 'condition', 'category', 'artist', 'generes', 'cover_image_url', 'price', 'sell_price', 'discount_porcentage', 'stock', 'slug', 'images']
 
     def get_sell_price(self, obj):
         """Always return the computed price so stale DB values never leak."""
@@ -187,7 +226,7 @@ class RecordCreateSerializer(RecordOwnersMixin, serializers.ModelSerializer):
     class Meta:
         model = Record
         fields = [
-            'title', 'artist', 'description', 'condition', 'genere',
+            'title', 'artist', 'description', 'condition', 'generes',
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'discount_porcentage', 'stock', 'images', 'release_date',
             'featured', 'items_inside', 'weight_grams', 'category', 'owners',
@@ -239,7 +278,7 @@ class RecordUpdateSerializer(RecordOwnersMixin, serializers.ModelSerializer):
     class Meta:
         model = Record
         fields = [
-            'title', 'artist', 'description', 'condition', 'genere',
+            'title', 'artist', 'description', 'condition', 'generes',
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'final_sale_price', 'discount_porcentage', 'stock', 'images',
             'release_date', 'featured', 'items_inside', 'weight_grams', 'category',

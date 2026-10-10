@@ -94,15 +94,17 @@ def test_metrics_combine_point_of_sale_and_paid_online_orders(admin_client, acti
     ana, beto = activity
     data = admin_client.get('/sales/metrics/', {'date_from': '2026-09-10', 'date_to': '2026-09-10'}).json()
 
+    # No line here has a cost recorded: profit = net, and every unit is flagged.
     assert data['summary'] == {
         'count': 4, 'units': 8, 'gross': '660.00', 'commission': '32.42', 'net': '627.58',
         'average_ticket': '165.00', 'shipping': '150.00',
+        'cost': '0.00', 'profit': '627.58', 'units_without_cost': 8,
     }
     assert data['channels'] == [
         {'channel': 'pos', 'count': 3, 'units': 5, 'gross': '360.00', 'commission': '10.15',
-         'net': '349.85', 'average_ticket': '120.00'},
+         'net': '349.85', 'average_ticket': '120.00', 'cost': '0.00', 'profit': '349.85', 'units_without_cost': 5},
         {'channel': 'online', 'count': 1, 'units': 3, 'gross': '300.00', 'commission': '22.27',
-         'net': '277.73', 'average_ticket': '300.00'},
+         'net': '277.73', 'average_ticket': '300.00', 'cost': '0.00', 'profit': '277.73', 'units_without_cost': 3},
     ]
     assert [(m['method'], m['gross'], m['commission']) for m in data['payment_methods']] == [
         ('stripe', '300.00', '22.27'), ('card', '250.00', '10.15'), ('cash', '70.00', '0.00'), ('unknown', '40.00', '0.00'),
@@ -132,3 +134,58 @@ def test_metrics_need_the_sales_tab(db, api_client):
     admin = get_user_model().objects.create_user(username='a', email='a@example.com', password='Pass12345!', role='ADMIN')
     api_client.force_authenticate(admin)
     assert api_client.get('/sales/metrics/', {'date_to': 'nope'}).status_code == 400
+
+
+# ── Profit: net minus the cost saved on each line at sale time ───────────
+
+
+def test_profit_uses_the_cost_saved_when_it_sold(admin_client):
+    from unittest import mock
+
+    from apiApp.models import Cart, CartItem
+    from apiApp.services import fulfill_checkout
+
+    ana = Owner.objects.create(name='Ana', email='ana@example.com')
+    kind = _record('Kind of Blue', ana, 'Miles Davis')
+    Record.objects.filter(pk=kind.pk).update(cost_price=Decimal('60.00'))
+    free = Record.objects.create(title='Sin costo', price=Decimal('80.00'), stock=5)  # cost_price defaults to 0
+
+    # Point of sale, card 4.06 %: 2 × 100 + 1 × 80 = 280, commission 11.37.
+    resp = admin_client.post('/sales/create/', {
+        'items': [{'record': kind.id, 'quantity': 2, 'price': '100.00'},
+                  {'record': free.id, 'quantity': 1, 'price': '80.00'}],
+        'payment_method': 'card',
+    }, format='json')
+    assert resp.status_code == 201
+    # Online: 1 × Kind of Blue at 100 through the real fulfillment path.
+    cart = Cart.objects.create()
+    CartItem.objects.create(cart=cart, record=kind, quantity=1)
+    session = {'id': 'cs_profit', 'amount_total': 10000, 'currency': 'mxn',
+               'customer_email': 'buyer@example.com', 'metadata': {'shipped_to': 'store'}}
+    with mock.patch('stripe.checkout.Session.list_line_items', side_effect=RuntimeError('offline tests')):
+        fulfill_checkout(session, cart.cart_code)
+    assert OrderItem.objects.get().cost_price == Decimal('60.00')
+
+    # The cost changes and a record is deleted afterwards: past profit must not move.
+    Record.objects.filter(pk=kind.pk).update(cost_price=Decimal('95.00'))
+    free.delete()
+
+    summary = admin_client.get('/sales/metrics/').json()['summary']
+    # cost = 3 × 60; fee on the 100 online order = (100 × 3.6% + 3) × 1.16 = 7.66.
+    assert (summary['gross'], summary['commission'], summary['cost']) == ('380.00', '19.03', '180.00')
+    assert summary['profit'] == '180.97'  # 380 - 19.03 - 180
+    assert summary['units_without_cost'] == 1  # the 80 record had no cost recorded
+
+    channels = {c['channel']: c for c in admin_client.get('/sales/metrics/').json()['channels']}
+    assert (channels['pos']['cost'], channels['pos']['profit']) == ('120.00', '148.63')
+    assert (channels['online']['cost'], channels['online']['profit']) == ('60.00', '32.34')
+    owner_row = next(o for o in admin_client.get('/sales/metrics/').json()['owners'] if o['owner'])
+    assert (owner_row['units'], owner_row['cost'], owner_row['units_without_cost']) == (3, '180.00', 0)
+
+
+def test_a_sale_below_cost_shows_negative_profit(admin_client):
+    record = Record.objects.create(title='Remate', price=Decimal('50.00'), cost_price=Decimal('120.00'), stock=1)
+    admin_client.post('/sales/create/', {'items': [{'record': record.id, 'quantity': 1}], 'payment_method': 'cash'},
+                      format='json')
+    summary = admin_client.get('/sales/metrics/').json()['summary']
+    assert (summary['net'], summary['cost'], summary['profit']) == ('50.00', '120.00', '-70.00')

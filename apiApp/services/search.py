@@ -36,12 +36,18 @@ def _query_tokens(query):
     return [tok for tok in tokens if tok]
 
 
+def _in_generes(generes):
+    """Q for records in any of ``generes``. A subquery, not a join: a record in
+    two matching genres would otherwise come back twice."""
+    return Q(id__in=Record.generes.through.objects.filter(genere__in=generes).values('record_id'))
+
+
 def _record_token_q(token):
     """Q matching one token against any searchable field's normalized slug."""
     return (
         Q(id__in=_slug_contains(Record, token))
         | Q(artist__in=_slug_contains(Artist, token))
-        | Q(genere__in=_slug_contains(Genere, token))
+        | _in_generes(_slug_contains(Genere, token))
         | Q(category__in=_slug_contains(Category, token))
     )
 
@@ -85,7 +91,7 @@ def search_records(query, *, category=None, available=None):
         records = Record.objects.filter(
             Q(title__icontains=query)
             | Q(artist__name__icontains=query)
-            | Q(genere__name__icontains=query)
+            | _in_generes(Genere.objects.filter(name__icontains=query))
             | Q(category__name__icontains=query)
         ).order_by('-id')
 
@@ -124,7 +130,7 @@ def apply_record_filters(records, params):
     """
     genere = (params.get('genere') or '').strip()
     if genere:
-        records = records.filter(genere__slug=genere)
+        records = records.filter(_in_generes(Genere.objects.filter(slug=genere)))
     artist = (params.get('artist') or '').strip()
     if artist:
         records = records.filter(artist__slug=artist)
@@ -139,7 +145,7 @@ def apply_record_filters(records, params):
         records = records.filter(sell_price__lte=price_max)
     ordering = RECORD_ORDERINGS.get(params.get('ordering'), '-id')
     # '-id' tiebreak keeps pagination stable when prices repeat.
-    return records.select_related('artist', 'category', 'genere').order_by(ordering, '-id')
+    return records.select_related('artist', 'category').prefetch_related('generes').order_by(ordering, '-id')
 
 
 def _norm_name(name):
@@ -192,7 +198,7 @@ def find_record_matches(title, artist_name='', limit=5):
         ranked.append((not (exact and same_artist), not same_artist, not exact, record_id))
 
     ids = [record_id for *_, record_id in sorted(ranked)[:limit]]
-    records = Record.objects.filter(id__in=ids).select_related('artist', 'category', 'genere').prefetch_related(
-        'owner_stock__owner'
+    records = Record.objects.filter(id__in=ids).select_related('artist', 'category').prefetch_related(
+        'generes', 'owner_stock__owner'
     ).in_bulk()
     return [records[record_id] for record_id in ids]

@@ -1,4 +1,6 @@
 """Order and sale serializers."""
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from ..models import Order, OrderItem, Owner, Record, Sale, SaleItem
@@ -56,29 +58,48 @@ class SaleItemSerializer(serializers.ModelSerializer):
     """One sold record. Title/artist/cover are the sale-time snapshot, so the
     line reprints the same after the record changes or is deleted."""
     owner = OwnerSerializer(read_only=True)
+    # Line profit: what it sold for, minus its commission share and its cost.
+    profit = serializers.SerializerMethodField()
 
     class Meta:
         model = SaleItem
         fields = [
             'id', 'record', 'title', 'artist', 'cover_image_url', 'owner',
-            'quantity', 'price', 'commission_amount', 'email_sent',
+            'quantity', 'price', 'commission_amount', 'cost_price', 'profit', 'email_sent',
         ]
+
+    def get_profit(self, obj):
+        return str(obj.price * obj.quantity - obj.commission_amount - obj.cost_price * obj.quantity)
 
 
 class SaleSerializer(serializers.ModelSerializer):
     """One ticket: everything the printable receipt needs."""
     items = SaleItemSerializer(many=True, read_only=True)
     subtotal = serializers.SerializerMethodField()
+    # Admin-only numbers (the printed receipt doesn't show them): cost of the
+    # records, saved when they sold, and final_sale_price - cost.
+    cost = serializers.SerializerMethodField()
+    profit = serializers.SerializerMethodField()
 
     class Meta:
         model = Sale
         fields = [
             'id', 'created_at', 'payment_method', 'commission_rate', 'commission_amount',
-            'subtotal', 'final_sale_price', 'items',
+            'subtotal', 'final_sale_price', 'cost', 'profit', 'items',
         ]
 
     def get_subtotal(self, obj):
         return str(obj.final_sale_price + obj.commission_amount)
+
+    def _cost(self, obj):
+        # items.all() reuses the prefetch from the views (no extra query per ticket).
+        return sum((item.cost_price * item.quantity for item in obj.items.all()), Decimal('0.00'))
+
+    def get_cost(self, obj):
+        return str(self._cost(obj))
+
+    def get_profit(self, obj):
+        return str(obj.final_sale_price - self._cost(obj))
 
 
 class SaleLineSerializer(serializers.Serializer):

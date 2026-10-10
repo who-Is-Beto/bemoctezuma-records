@@ -329,12 +329,18 @@ def test_history_filters_by_store_date_and_owner_with_totals(admin):
     assert (sale['payment_method'], sale['commission_rate'], sale['commission_amount'], sale['subtotal'],
             sale['final_sale_price']) == ('card', '4.06', '10.15', '250.00', '239.85')
     assert sorted(i['title'] for i in sale['items']) == ['Abbey Road', 'Kind of Blue']
-    assert day['totals'] == {'subtotal': '250.00', 'commission': '10.15', 'net': '239.85'}
+    assert day['totals'] == {
+        'subtotal': '250.00', 'commission': '10.15', 'net': '239.85',
+        'cost': '0.00', 'profit': '239.85', 'units_without_cost': 3,  # no cost recorded on these records
+    }
 
     # Owner filter: the whole ticket comes back (receipt), totals count only Ana's lines.
     ana_only = client.get('/sales/', {'date_from': '2026-09-10', 'date_to': '2026-09-11', 'owner': ana.id}).json()
     assert [len(s['items']) for s in ana_only['results']] == [1, 2]  # newest first
-    assert ana_only['totals'] == {'subtotal': '270.00', 'commission': '8.12', 'net': '261.88'}
+    assert ana_only['totals'] == {
+        'subtotal': '270.00', 'commission': '8.12', 'net': '261.88',
+        'cost': '0.00', 'profit': '261.88', 'units_without_cost': 3,
+    }
 
     everything = client.get('/sales/').json()
     assert len(everything['results']) == 3 and everything['totals']['subtotal'] == '1319.00'
@@ -423,3 +429,28 @@ def test_migration_backfills_sales_registered_before_payment_methods(admin):
     assert (legacy.payment_method, legacy.commission_amount, legacy.final_sale_price) == ('', Decimal('0.00'), Decimal('320.00'))
     snapshots = list(legacy.items.order_by('id').values_list('title', 'artist', 'cover_image_url'))
     assert snapshots == [('Kind of Blue', 'Miles Davis', 'https://img.example.com/kind.jpg'), ('', '', None)]
+
+
+def test_history_shows_cost_and_profit_per_ticket_line_and_totals(admin):
+    """Profit = what the store keeps after commission minus the cost saved at sale time."""
+    ana, beto = _owner(), _owner('Beto', 'beto@example.com')
+    kind = _record(stock=3, owner=ana, price='200.00')
+    abbey = _record('Abbey Road', owner=beto, artist='The Beatles', price='100.00')
+    Record.objects.filter(pk=kind.pk).update(cost_price=Decimal('120.00'))  # abbey: no cost recorded
+    client = _client(admin)
+    # Card 4.06 % on 2 × 200 + 1 × 100 = 500 → commission 20.30 (shares 16.24 / 4.06).
+    resp = _sell(client, {'record': kind.id, 'quantity': 2}, {'record': abbey.id, 'quantity': 1}, payment_method='card')
+    assert resp.status_code == 201
+    # A later cost change must not rewrite this sale's profit.
+    Record.objects.filter(pk=kind.pk).update(cost_price=Decimal('999.00'))
+
+    sale = client.get('/sales/').json()['results'][0]
+    assert (sale['final_sale_price'], sale['cost'], sale['profit']) == ('479.70', '240.00', '239.70')
+    lines = {i['title']: (i['cost_price'], i['profit']) for i in sale['items']}
+    assert lines == {'Kind of Blue': ('120.00', '143.76'), 'Abbey Road': ('0.00', '95.94')}  # 400-16.24-240 / 100-4.06
+
+    totals = client.get('/sales/').json()['totals']
+    assert (totals['net'], totals['cost'], totals['profit'], totals['units_without_cost']) == ('479.70', '240.00', '239.70', 1)
+    # Filtered by owner, totals count only that owner's lines.
+    ana_totals = client.get('/sales/', {'owner': ana.id}).json()['totals']
+    assert (ana_totals['cost'], ana_totals['profit'], ana_totals['units_without_cost']) == ('240.00', '143.76', 0)

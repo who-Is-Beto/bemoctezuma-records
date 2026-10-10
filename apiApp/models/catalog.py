@@ -92,7 +92,8 @@ class Record(models.Model):
     artist = models.ForeignKey(Artist, on_delete=models.PROTECT, related_name='records', blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     condition = models.CharField(max_length=4, choices=CONDITIONS, default='M')
-    genere = models.ForeignKey(Genere, on_delete=models.CASCADE, related_name='records', blank=True, null=True)
+    # A record can be in several genres; deleting a genre only takes it off its records.
+    generes = models.ManyToManyField(Genere, related_name='records', blank=True)
     cover_image_url = models.URLField(max_length=200, blank=True, null=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -109,7 +110,9 @@ class Record(models.Model):
     # shipping weight falls back to the category-based default in services.py
     # (LP 300g, 7" 100g, CD 85g).
     weight_grams = models.PositiveIntegerField(blank=True, null=True, validators=[MinValueValidator(0)])
-    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='records', blank=True, null=True)
+    # The format (LP, 7", CD...). PROTECT: deleting a format must go through
+    # /categories/<id>/delete/, which moves its records first (CASCADE deleted them).
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name='records', blank=True, null=True)
 
     def __str__(self):
         return f"{self.title} by {self.artist}"

@@ -56,8 +56,8 @@ def get_all_cart_items(request):
     if blocked:
         return blocked
     cart_items = CartItem.objects.select_related(
-        'record__artist', 'record__category', 'record__genere',
-    ).all()
+        'record__artist', 'record__category',
+    ).prefetch_related('record__generes')
     serializer = CartItemSerializer(cart_items, many=True)
     return Response(serializer.data)
 

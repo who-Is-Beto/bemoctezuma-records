@@ -46,12 +46,12 @@ def _optimized_cart(cart):
         return Cart.objects.filter(pk=cart.pk).prefetch_related(
             'cart_items__record__artist',
             'cart_items__record__category',
-            'cart_items__record__genere',
+            'cart_items__record__generes',
         ).get(pk=cart.pk)
     return cart.prefetch_related(
         'cart_items__record__artist',
         'cart_items__record__category',
-        'cart_items__record__genere',
+        'cart_items__record__generes',
     )
 
 

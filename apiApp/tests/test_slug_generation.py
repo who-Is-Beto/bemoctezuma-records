@@ -96,7 +96,7 @@ def test_record_create_endpoint_accepts_long_title(api_client):
         "description": "Contenido (lista de canciones)",
         "discount_porcentage": 0,
         "featured": True,
-        "genere": None,
+        "generes": [],
         "images": [],
         "items_inside": 2,
         "price": 870,

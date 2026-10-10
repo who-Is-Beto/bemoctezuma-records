@@ -19,6 +19,13 @@ TABS = [
     ('add-record', 'Agregar disco', 'tab_add_record', [
         ('add_record', 'Crear discos'),
         ('delete_artist', 'Eliminar artistas (reasignando sus discos)'),
+        # Formats and genres are managed from the record form's pickers.
+        ('add_category', 'Crear formatos'),
+        ('change_category', 'Renombrar formatos'),
+        ('delete_category', 'Eliminar formatos (moviendo sus discos)'),
+        ('add_genere', 'Crear géneros'),
+        ('change_genere', 'Renombrar géneros'),
+        ('delete_genere', 'Eliminar géneros'),
     ]),
     ('manage-records', 'Punto de venta', 'tab_manage_records', [
         ('change_record', 'Editar y vender discos'),

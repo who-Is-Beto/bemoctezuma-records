@@ -122,14 +122,24 @@ def estimated_stripe_fee(amount):
 
 
 def _bucket():
-    return {'count': 0, 'units': 0, 'gross': ZERO, 'commission': ZERO}
+    return {'count': 0, 'units': 0, 'gross': ZERO, 'commission': ZERO, 'cost': ZERO, 'units_without_cost': 0}
 
 
-def _add(bucket, gross, commission, count=1, units=0):
+def _add(bucket, gross, commission, count=1, units=0, cost=ZERO, units_without_cost=0):
     bucket['count'] += count
     bucket['units'] += units
     bucket['gross'] += gross
     bucket['commission'] += commission
+    bucket['cost'] += cost
+    bucket['units_without_cost'] += units_without_cost
+
+
+def _costs(items):
+    """(cost, units_without_cost) of sale lines, from the cost saved at sale time.
+    A 0 cost means none was recorded: profit counts those units at full net, so
+    the UI flags how many there are instead of showing an inflated number silently."""
+    cost = sum((item.cost_price * item.quantity for item in items), ZERO)
+    return cost, sum(item.quantity for item in items if not item.cost_price)
 
 
 def _money_fields(bucket):
@@ -141,6 +151,10 @@ def _money_fields(bucket):
         'commission': str(_cents(commission)),
         'net': str(_cents(gross - commission)),
         'average_ticket': str(_cents(gross / count) if count else ZERO),
+        # Profit = net (after card/Stripe commission) - cost of the records sold.
+        'cost': str(_cents(bucket['cost'])),
+        'profit': str(_cents(gross - commission - bucket['cost'])),
+        'units_without_cost': bucket['units_without_cost'],
     }
 
 
@@ -151,6 +165,7 @@ def sales_metrics(date_from=None, date_to=None):
     reported apart). Commission is the stored card commission for the point
     of sale and an *estimated* Stripe fee for online orders; online owners
     get the fee share of their lines, the shipping share stays with the store.
+    Profit is net minus the cost saved on each line at sale time.
     """
     sales = Sale.objects.prefetch_related('items__owner')
     orders = Order.objects.filter(status__in=ONLINE_SALE_STATUSES).prefetch_related(
@@ -178,11 +193,12 @@ def sales_metrics(date_from=None, date_to=None):
         row['units'] += quantity
         row['gross'] += gross
 
-    def add_owner(owner, quantity, gross, commission):
+    def add_owner(owner, item, gross, commission):
         key = owner.id if owner else None
         if key not in owners:
             owners[key] = {'owner': {'id': owner.id, 'name': owner.name} if owner else None, **_bucket()}
-        _add(owners[key], gross, commission, count=0, units=quantity)
+        cost, uncosted = _costs([item])
+        _add(owners[key], gross, commission, count=0, units=item.quantity, cost=cost, units_without_cost=uncosted)
 
     # ponytail: aggregated in Python (exact Decimals, one shape for both channels);
     # the date range bounds it. Move to DB aggregates if the range gets slow.
@@ -190,13 +206,14 @@ def sales_metrics(date_from=None, date_to=None):
         items = list(sale.items.all())
         gross = sum((item.price * item.quantity for item in items), ZERO)
         units = sum(item.quantity for item in items)
-        _add(channels['pos'], gross, sale.commission_amount, units=units)
-        _add(methods[sale.payment_method or 'unknown'], gross, sale.commission_amount, units=units)
+        cost, uncosted = _costs(items)
+        for bucket in (channels['pos'], methods[sale.payment_method or 'unknown']):
+            _add(bucket, gross, sale.commission_amount, units=units, cost=cost, units_without_cost=uncosted)
         for item in items:
             line = item.price * item.quantity
             add_record(item.record_id, item.title or '(disco eliminado)', item.artist,
                        item.cover_image_url, item.quantity, line)
-            add_owner(item.owner, item.quantity, line, item.commission_amount)
+            add_owner(item.owner, item, line, item.commission_amount)
 
     shipping = ZERO
     for order in orders:
@@ -204,8 +221,9 @@ def sales_metrics(date_from=None, date_to=None):
         fee = estimated_stripe_fee(order.amount)
         items = list(order.order_items.all())
         units = sum(item.quantity for item in items)
-        _add(channels['online'], order.amount - order_shipping, fee, units=units)
-        _add(methods['stripe'], order.amount - order_shipping, fee, units=units)
+        cost, uncosted = _costs(items)
+        for bucket in (channels['online'], methods['stripe']):
+            _add(bucket, order.amount - order_shipping, fee, units=units, cost=cost, units_without_cost=uncosted)
         shipping += order_shipping
         for item in items:
             record = item.record
@@ -217,11 +235,12 @@ def sales_metrics(date_from=None, date_to=None):
                 record.cover_image_url if record else None,
                 item.quantity, line,
             )
-            add_owner(item.owner, item.quantity, line, fee * line / order.amount)
+            add_owner(item.owner, item, line, fee * line / order.amount)
 
     summary = _bucket()
     for bucket in channels.values():
-        _add(summary, bucket['gross'], bucket['commission'], count=bucket['count'], units=bucket['units'])
+        _add(summary, bucket['gross'], bucket['commission'], count=bucket['count'], units=bucket['units'],
+             cost=bucket['cost'], units_without_cost=bucket['units_without_cost'])
 
     top_records = sorted(records.values(), key=lambda r: (r['units'], r['gross']), reverse=True)[:10]
     return {
