@@ -113,6 +113,10 @@ class Record(models.Model):
     # The format (LP, 7", CD...). PROTECT: deleting a format must go through
     # /categories/<id>/delete/, which moves its records first (CASCADE deleted them).
     category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name='records', blank=True, null=True)
+    # The same release in another condition: each copy is a full record (own
+    # price, stock, owners), grouped under the first one. The catalog shows a
+    # group as one card. Groups are one level deep (see services/copies.py).
+    variant_of = models.ForeignKey('self', on_delete=models.SET_NULL, related_name='variants', blank=True, null=True)
 
     def __str__(self):
         return f"{self.title} by {self.artist}"

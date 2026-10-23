@@ -54,7 +54,8 @@ from .config import (
     set_maintenance_state,
 )
 from .inventory import take_stock
-from .sales import commission_rate_for, notify_sale_owners, sales_metrics, split_commission
+from .copies import CONDITION_RANK, collapse_copies, copies_by_group, group_id, promote_first_copy
+from .sales import SALES_CSV_HEADER, commission_rate_for, notify_sale_owners, sales_csv_rows, sales_metrics, split_commission
 
 __all__ = [
     # emailing
@@ -99,8 +100,16 @@ __all__ = [
     'set_maintenance_state',
     # inventory
     'take_stock',
+    # copies
+    'CONDITION_RANK',
+    'collapse_copies',
+    'copies_by_group',
+    'group_id',
+    'promote_first_copy',
     # sales
+    'SALES_CSV_HEADER',
     'commission_rate_for',
+    'sales_csv_rows',
     'notify_sale_owners',
     'sales_metrics',
     'split_commission',

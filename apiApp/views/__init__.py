@@ -110,6 +110,7 @@ from .sales import (
     sale_create,
     sales_list,
     sales_metrics_view,
+    sales_export,
 )
 
 __all__ = [
@@ -206,4 +207,5 @@ __all__ = [
     'sale_create',
     'sales_list',
     'sales_metrics_view',
+    'sales_export',
 ]

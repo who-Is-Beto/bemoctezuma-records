@@ -208,6 +208,15 @@ def test_sale_is_saved_decrements_stock_and_emails_the_owner(admin):
         assert text in msg.body
 
 
+def test_owner_email_shows_the_record_cover(admin):
+    record = _record(owner=_owner())
+    record.cover_image_url = 'https://img.example.com/kind-of-blue.jpg'
+    record.save()
+    assert _sell(_client(admin), {'record': record.id, 'quantity': 1}).status_code == 201
+    html = mail.outbox[0].alternatives[0][0]
+    assert '<img src="https://img.example.com/kind-of-blue.jpg"' in html
+
+
 def test_price_defaults_to_the_discounted_record_price(admin):
     record = _record(price='200.00', owner=_owner())
     record.discount_porcentage = 10

@@ -79,6 +79,7 @@ def notify_sale_owners(sale):
                     "items": [{
                         "title": item.title,
                         "artist": item.artist,
+                        "image_url": item.cover_image_url,
                         "quantity": item.quantity,
                         "price_str": _money(item.price),
                         "subtotal_str": _money(item.price * item.quantity),
@@ -256,3 +257,72 @@ def sales_metrics(date_from=None, date_to=None):
             for row in sorted(owners.values(), key=lambda r: r['gross'], reverse=True)
         ],
     }
+
+
+# ── Ventas → Exportar CSV ────────────────────────────────────────────────
+
+SALES_CSV_HEADER = [
+    'Fecha', 'Hora', 'Canal', 'Folio', 'Forma de pago', 'Cliente',
+    'Disco', 'Artista', 'Condición', 'Dueño', 'Correo del dueño',
+    'Cantidad', 'Precio unitario', 'Subtotal', 'Comisión', 'Neto',
+    'Costo unitario', 'Costo total', 'Ganancia',
+]
+
+
+def sales_csv_rows(date_from=None, date_to=None, owner_id=None):
+    """Every sold line of the period, oldest first: point of sale plus paid
+    online orders, one row each (SALES_CSV_HEADER columns).
+
+    Same numbers as the metrics: online commission is the estimated Stripe fee
+    share of the line, shipping is left out. With ``owner_id`` only that
+    owner's lines. Money as plain decimals so spreadsheets read them as numbers.
+    """
+    sales = Sale.objects.prefetch_related('items__owner', 'items__record')
+    orders = Order.objects.filter(status__in=ONLINE_SALE_STATUSES).prefetch_related(
+        'order_items__record__artist', 'order_items__owner'
+    )
+    if date_from:
+        sales = sales.filter(created_at__date__gte=date_from)
+        orders = orders.filter(created_at__date__gte=date_from)
+    if date_to:
+        sales = sales.filter(created_at__date__lte=date_to)
+        orders = orders.filter(created_at__date__lte=date_to)
+
+    def row(created_at, channel, folio, method, customer, item, title, artist, commission):
+        when = timezone.localtime(created_at)
+        record, owner = item.record, item.owner
+        gross = item.price * item.quantity
+        cost = item.cost_price * item.quantity
+        return created_at, [
+            when.strftime('%Y-%m-%d'), when.strftime('%H:%M'), channel, folio, method, customer,
+            title, artist, record.get_condition_display() if record else '',
+            owner.name if owner else 'Sin dueño', owner.email if owner else '',
+            item.quantity, f'{item.price:.2f}', f'{gross:.2f}', f'{_cents(commission):.2f}',
+            f'{_cents(gross - commission):.2f}', f'{item.cost_price:.2f}', f'{cost:.2f}',
+            f'{_cents(gross - commission - cost):.2f}',
+        ]
+
+    rows = []
+    for sale in sales:
+        for item in sale.items.all():
+            if owner_id and item.owner_id != owner_id:
+                continue
+            rows.append(row(
+                sale.created_at, 'Punto de venta', f'Venta #{sale.id}',
+                sale.get_payment_method_display() or 'Sin registrar', '', item,
+                item.title or '(disco eliminado)', item.artist, item.commission_amount,
+            ))
+    for order in orders:
+        fee = estimated_stripe_fee(order.amount)
+        for item in order.order_items.all():
+            if owner_id and item.owner_id != owner_id:
+                continue
+            record = item.record
+            rows.append(row(
+                order.created_at, 'En línea', f'Orden #{order.id}', 'Stripe', order.user_email, item,
+                record.title if record else '(disco eliminado)',
+                record.artist.name if record and record.artist else '',
+                fee * item.price * item.quantity / order.amount if order.amount else ZERO,
+            ))
+    rows.sort(key=lambda r: r[0])
+    return [values for _, values in rows]

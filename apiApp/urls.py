@@ -64,6 +64,7 @@ urlpatterns = [
     path('sales/', views.sales_list, name='sales-list'),
     path('sales/create/', views.sale_create, name='sale-create'),
     path('sales/metrics/', views.sales_metrics_view, name='sales-metrics'),
+    path('sales/export/', views.sales_export, name='sales-export'),
     path('auth/register/', views.register_user, name='auth-register-user'),
     path('auth/login/', views.login_user, name='auth-login-user'),
     path('auth/verify-email/', views.verify_email, name='verify-email'),

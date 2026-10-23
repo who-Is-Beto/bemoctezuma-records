@@ -1,8 +1,10 @@
 """Owners (who a record belongs to) and the sales registered in Punto de venta."""
+import csv
 from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Prefetch
+from django.http import HttpResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -15,7 +17,10 @@ from ..serilizers import (
     SaleSerializer,
     SalesFilterSerializer,
 )
-from ..services import commission_rate_for, notify_sale_owners, sales_metrics, split_commission, take_stock
+from ..services import (
+    SALES_CSV_HEADER, commission_rate_for, notify_sale_owners, sales_csv_rows, sales_metrics, split_commission,
+    take_stock,
+)
 
 
 @api_view(['GET'])
@@ -181,3 +186,26 @@ def sales_metrics_view(request):
     return Response(sales_metrics(
         filters.validated_data.get('date_from'), filters.validated_data.get('date_to'),
     ))
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def sales_export(request):
+    """Ventas → Exportar CSV: every sold line (point of sale + online), same
+    filters as /sales/ (?date_from=&date_to=&owner=). Admin, or a role with
+    the Ventas tab."""
+    admin_err = _require_admin(request, 'apiApp.tab_sales')
+    if admin_err:
+        return admin_err
+
+    filters = SalesFilterSerializer(data=request.query_params)
+    filters.is_valid(raise_exception=True)
+    data = filters.validated_data
+    response = HttpResponse(content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = 'attachment; filename="ventas.csv"'
+    # BOM: Excel otherwise opens UTF-8 as Latin-1 and mangles the accents.
+    response.write('\ufeff')
+    writer = csv.writer(response)
+    writer.writerow(SALES_CSV_HEADER)
+    writer.writerows(sales_csv_rows(data.get('date_from'), data.get('date_to'), data.get('owner')))
+    return response
