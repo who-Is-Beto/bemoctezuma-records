@@ -1,9 +1,8 @@
 """Record search view (tokenized, accent- and punctuation-insensitive)."""
 from rest_framework.decorators import api_view
 
+from .catalog import paginated_records
 from .common import error_response
-from ..pagination import StandardResultsSetPagination
-from ..serilizers import RecordListSerializer
 from ..services import apply_record_filters, search_records
 
 
@@ -31,7 +30,4 @@ def record_search(request):
 
     # Same paginated envelope as /records/ (count/next/previous/results).
     # "No matches" is a valid, empty page — not an error.
-    paginator = StandardResultsSetPagination()
-    page = paginator.paginate_queryset(records, request)
-    serializer = RecordListSerializer(page, many=True)
-    return paginator.get_paginated_response(serializer.data)
+    return paginated_records(request, records)

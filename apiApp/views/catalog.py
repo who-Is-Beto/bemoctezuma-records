@@ -19,7 +19,9 @@ from ..serilizers import (
     RecordDetailSerializer,
     RecordListSerializer,
 )
-from ..services import apply_record_filters, find_record_matches, most_similar_artist, search_artists
+from ..services import (
+    apply_record_filters, collapse_copies, copies_by_group, find_record_matches, most_similar_artist, search_artists,
+)
 
 
 @api_view(['GET'])
@@ -42,10 +44,17 @@ def record_list(request):
 
     # genere / artist / condition / price range / ordering (+ FK joins)
     records = apply_record_filters(records, request.query_params)
+    return paginated_records(request, records)
 
+
+def paginated_records(request, records):
+    """The /records/ and /search/ page: one card per release, its copies in
+    other conditions nested (?all_copies=true lists every copy: Punto de venta)."""
+    if (request.query_params.get('all_copies') or '').lower() not in ('true', '1', 'yes'):
+        records = collapse_copies(records)
     paginator = StandardResultsSetPagination()
     page = paginator.paginate_queryset(records, request)
-    serializer = RecordListSerializer(page, many=True)
+    serializer = RecordListSerializer(page, many=True, context={'copies': copies_by_group(page)})
     return paginator.get_paginated_response(serializer.data)
 
 

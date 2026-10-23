@@ -4,6 +4,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
 from ..models import Artist, Category, Genere, Owner, Record, RecordOwner
+from ..services.copies import copies_by_group, group_id
 
 
 def _normalize_decimal_string(value):
@@ -172,9 +173,47 @@ class RecordOwnersMixin(serializers.Serializer):
         return record
 
 
+class RecordCopyOfMixin(serializers.Serializer):
+    """Writable ``variant_of``: the record this one is another condition of."""
+
+    def validate_variant_of(self, value):
+        """Copies always hang from the group's first record (one level deep)."""
+        if value is None:
+            return None
+        first = value.variant_of or value
+        if self.instance is not None:
+            if first.pk == self.instance.pk:
+                raise serializers.ValidationError("Un disco no puede ser otra condición de sí mismo.")
+            if self.instance.variants.exists():
+                raise serializers.ValidationError(
+                    "Este disco ya tiene otras condiciones: no puede ser copia de otro."
+                )
+        return first
+
+
 # Business-internal (margin, last sale price): only admin responses carry
 # them (RecordAdminSerializer, plus the owners), never the public catalog.
 PRIVATE_RECORD_FIELDS = ['cost_price', 'final_sale_price']
+
+
+class RecordCopySerializer(serializers.ModelSerializer):
+    """One copy of a release in the condition picker (catalog card, detail page)."""
+    sell_price = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Record
+        fields = [
+            'id', 'slug', 'condition', 'price', 'sell_price', 'discount_porcentage',
+            'stock', 'cover_image_url', 'images',
+        ]
+
+    def get_sell_price(self, obj):
+        return str(obj.effective_price)
+
+
+def _copies(copies):
+    """Every copy of the group, or [] when the record is the only one."""
+    return RecordCopySerializer(copies, many=True).data if len(copies) > 1 else []
 
 
 class RecordDetailSerializer(serializers.ModelSerializer):
@@ -182,6 +221,8 @@ class RecordDetailSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     generes = GenereSerializer(many=True, read_only=True)
     sell_price = serializers.SerializerMethodField()
+    # This record and its copies in other conditions, best condition first.
+    copies = serializers.SerializerMethodField()
 
     class Meta:
         model = Record
@@ -190,6 +231,9 @@ class RecordDetailSerializer(serializers.ModelSerializer):
     def get_sell_price(self, obj):
         """Always return the computed price so stale DB values never leak."""
         return str(obj.effective_price)
+
+    def get_copies(self, obj):
+        return _copies(copies_by_group([obj])[group_id(obj)])
 
 
 class RecordAdminSerializer(RecordDetailSerializer):
@@ -206,17 +250,23 @@ class RecordListSerializer(serializers.ModelSerializer):
     category = CategoryListSerializer(read_only=True)
     generes = GenereSerializer(many=True, read_only=True)
     sell_price = serializers.SerializerMethodField()
+    # Copies in other conditions, from context['copies'] (copies_by_group of
+    # the page: one query). Nested in cart/wishlist/orders it's always [].
+    copies = serializers.SerializerMethodField()
 
     class Meta:
         model = Record
-        fields = ['id', 'title', 'condition', 'category', 'artist', 'generes', 'cover_image_url', 'price', 'sell_price', 'discount_porcentage', 'stock', 'slug', 'images']
+        fields = ['id', 'title', 'condition', 'category', 'artist', 'generes', 'cover_image_url', 'price', 'sell_price', 'discount_porcentage', 'stock', 'slug', 'images', 'variant_of', 'copies']
 
     def get_sell_price(self, obj):
         """Always return the computed price so stale DB values never leak."""
         return str(obj.effective_price)
 
+    def get_copies(self, obj):
+        return _copies(self.context.get('copies', {}).get(group_id(obj), []))
 
-class RecordCreateSerializer(RecordOwnersMixin, serializers.ModelSerializer):
+
+class RecordCreateSerializer(RecordCopyOfMixin, RecordOwnersMixin, serializers.ModelSerializer):
     """Write-only serializer for creating a record via the admin inventory form.
 
     FKs are accepted as plain IDs (not nested objects).
@@ -229,7 +279,7 @@ class RecordCreateSerializer(RecordOwnersMixin, serializers.ModelSerializer):
             'title', 'artist', 'description', 'condition', 'generes',
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'discount_porcentage', 'stock', 'images', 'release_date',
-            'featured', 'items_inside', 'weight_grams', 'category', 'owners',
+            'featured', 'items_inside', 'weight_grams', 'category', 'owners', 'variant_of',
         ]
         extra_kwargs = {
             'price': {'required': True},
@@ -268,7 +318,7 @@ class RecordCreateSerializer(RecordOwnersMixin, serializers.ModelSerializer):
         return value
 
 
-class RecordUpdateSerializer(RecordOwnersMixin, serializers.ModelSerializer):
+class RecordUpdateSerializer(RecordCopyOfMixin, RecordOwnersMixin, serializers.ModelSerializer):
     """Writable serializer for admin record updates (PATCH).
 
     FKs are accepted as plain IDs (not nested objects).
@@ -282,7 +332,7 @@ class RecordUpdateSerializer(RecordOwnersMixin, serializers.ModelSerializer):
             'cover_image_url', 'price', 'cost_price', 'sell_price',
             'final_sale_price', 'discount_porcentage', 'stock', 'images',
             'release_date', 'featured', 'items_inside', 'weight_grams', 'category',
-            'owners',
+            'owners', 'variant_of',
         ]
         extra_kwargs = {
             field: {'required': False}

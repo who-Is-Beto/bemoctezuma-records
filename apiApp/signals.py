@@ -2,6 +2,7 @@ from django.db.models.signals import post_save, post_delete, pre_delete
 from django.dispatch import receiver
 from django.db.models import Avg
 from .models import Record, Review, RecordRatingSummary
+from .services import promote_first_copy
 
 # Records currently being deleted. When a record goes away its reviews are
 # cascade-deleted and each fires post_delete; recomputing the rating summary
@@ -13,6 +14,8 @@ _records_being_deleted = set()
 @receiver(pre_delete, sender=Record)
 def _mark_record_deletion(sender, instance, **kwargs):
     _records_being_deleted.add(instance.pk)
+    # Its copies in other conditions stay grouped under the oldest one.
+    promote_first_copy(instance)
 
 
 @receiver(post_delete, sender=Record)

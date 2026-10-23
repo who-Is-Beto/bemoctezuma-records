@@ -189,3 +189,45 @@ def test_a_sale_below_cost_shows_negative_profit(admin_client):
                       format='json')
     summary = admin_client.get('/sales/metrics/').json()['summary']
     assert (summary['net'], summary['cost'], summary['profit']) == ('50.00', '120.00', '-70.00')
+
+
+# ── Exportar CSV (GET /sales/export/) ────────────────────────────────────
+
+
+def _csv(client, url):
+    resp = client.get(url)
+    assert resp.status_code == 200
+    assert resp['Content-Type'].startswith('text/csv')
+    text = resp.content.decode('utf-8')
+    assert text.startswith('﻿')  # Excel reads the accents as UTF-8
+    import csv
+    return list(csv.reader(text[1:].splitlines()))
+
+
+def test_export_has_every_paid_line_of_the_period(admin_client, activity):
+    header, *rows = _csv(admin_client, '/sales/export/?date_from=2026-09-10&date_to=2026-09-10')
+    assert header[:4] == ['Fecha', 'Hora', 'Canal', 'Folio']
+    # 4 point-of-sale lines + the paid order's line; canceled/pending/other days left out.
+    assert len(rows) == 5
+    col = {name: i for i, name in enumerate(header)}
+    online = next(r for r in rows if r[col['Canal']] == 'En línea')
+    assert (online[col['Disco']], online[col['Dueño']], online[col['Cantidad']]) == ('Abbey Road', 'Beto', '3')
+    assert (online[col['Subtotal']], online[col['Cliente']]) == ('300.00', 'cliente@example.com')
+    # Fee share of the $450 order: 22.27 × 300 / 450.
+    assert (online[col['Comisión']], online[col['Neto']]) == ('14.85', '285.15')
+    card = next(r for r in rows if r[col['Forma de pago']] == 'Tarjeta' and r[col['Disco']] == 'Kind of Blue')
+    assert (card[col['Fecha']], card[col['Subtotal']], card[col['Comisión']], card[col['Ganancia']]) == (
+        '2026-09-10', '200.00', '8.12', '191.88')
+
+
+def test_export_by_owner_has_only_their_lines(admin_client, activity):
+    ana, _ = activity
+    header, *rows = _csv(admin_client, f'/sales/export/?owner={ana.id}')
+    assert {r[header.index('Dueño')] for r in rows} == {'Ana'}
+    assert len(rows) == 4  # 3 point-of-sale lines + the old delivered order
+
+
+def test_export_needs_the_sales_tab(db, api_client):
+    customer = get_user_model().objects.create_user(username='c', email='c@example.com', password='Pass12345!')
+    api_client.force_authenticate(customer)
+    assert api_client.get('/sales/export/').status_code == 403
