@@ -269,6 +269,10 @@ else:
     MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Cover thumbnails (services/thumbnails.py) need public cloud storage: on by
+# default when a bucket is set, COVER_THUMBNAILS=0 turns them off.
+COVER_THUMBNAILS = os.getenv("COVER_THUMBNAILS", "1" if _STORAGE_BUCKET else "0") == "1"
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

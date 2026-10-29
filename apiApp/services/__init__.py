@@ -55,7 +55,8 @@ from .config import (
 )
 from .inventory import take_stock
 from .copies import CONDITION_RANK, collapse_copies, copies_by_group, group_id, promote_first_copy
-from .sales import SALES_CSV_HEADER, commission_rate_for, notify_sale_owners, sales_csv_rows, sales_metrics, split_commission
+from .thumbnails import THUMB_WIDTHS, make_cover_thumbs, refresh_cover_thumbs, thumbs_are_stale
+from .sales import SALES_CSV_HEADER, commission_rate_for, previous_period, notify_sale_owners, sales_csv_rows, sales_metrics, split_commission
 
 __all__ = [
     # emailing
@@ -106,11 +107,17 @@ __all__ = [
     'copies_by_group',
     'group_id',
     'promote_first_copy',
+    # thumbnails
+    'THUMB_WIDTHS',
+    'make_cover_thumbs',
+    'refresh_cover_thumbs',
+    'thumbs_are_stale',
     # sales
     'SALES_CSV_HEADER',
     'commission_rate_for',
     'sales_csv_rows',
     'notify_sale_owners',
     'sales_metrics',
+    'previous_period',
     'split_commission',
 ]

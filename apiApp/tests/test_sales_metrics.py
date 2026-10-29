@@ -206,7 +206,7 @@ def _csv(client, url):
 
 def test_export_has_every_paid_line_of_the_period(admin_client, activity):
     header, *rows = _csv(admin_client, '/sales/export/?date_from=2026-09-10&date_to=2026-09-10')
-    assert header[:4] == ['Fecha', 'Hora', 'Canal', 'Folio']
+    assert header[:5] == ['Fecha', 'Hora', 'Canal', 'Lugar de venta', 'Folio']
     # 4 point-of-sale lines + the paid order's line; canceled/pending/other days left out.
     assert len(rows) == 5
     col = {name: i for i, name in enumerate(header)}

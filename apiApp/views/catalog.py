@@ -47,6 +47,23 @@ def record_list(request):
     return paginated_records(request, records)
 
 
+@api_view(['GET'])
+def record_featured(_):
+    """A random in-stock record with a cover: the home hero's sleeve, a new
+    one each visit. 404 when there's none (the hero shows its placeholder)."""
+    # ponytail: ORDER BY random() scans the in-stock rows; fine for a few
+    # thousand records. Pick a random offset over a count if it ever isn't.
+    record = (
+        Record.objects.filter(featured=True, stock__gt=0)
+        .exclude(cover_image_url__isnull=True).exclude(cover_image_url='')
+        .select_related('artist', 'category').prefetch_related('generes')
+        .order_by('?').first()
+    )
+    if record is None:
+        return error_response("No hay discos disponibles", status_code=404, code="no_featured_record")
+    return Response(RecordListSerializer(record).data)
+
+
 def paginated_records(request, records):
     """The /records/ and /search/ page: one card per release, its copies in
     other conditions nested (?all_copies=true lists every copy: Punto de venta)."""

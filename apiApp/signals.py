@@ -2,7 +2,8 @@ from django.db.models.signals import post_save, post_delete, pre_delete
 from django.dispatch import receiver
 from django.db.models import Avg
 from .models import Record, Review, RecordRatingSummary
-from .services import promote_first_copy
+from django.db import transaction
+from .services import promote_first_copy, refresh_cover_thumbs, thumbs_are_stale
 
 # Records currently being deleted. When a record goes away its reviews are
 # cascade-deleted and each fires post_delete; recomputing the rating summary
@@ -50,3 +51,10 @@ def update_rating_on_delete(sender, instance, **kwargs):
     rating_summary.average_rating = average_rating
     rating_summary.total_reviews = total_reviews
     rating_summary.save()
+
+
+@receiver(post_save, sender=Record)
+def _refresh_cover_thumbs(sender, instance, **kwargs):
+    # After commit: the download never holds the save's transaction open.
+    if thumbs_are_stale(instance):
+        transaction.on_commit(lambda: refresh_cover_thumbs(instance))

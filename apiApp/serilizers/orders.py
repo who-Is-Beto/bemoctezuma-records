@@ -84,7 +84,7 @@ class SaleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sale
         fields = [
-            'id', 'created_at', 'payment_method', 'commission_rate', 'commission_amount',
+            'id', 'created_at', 'payment_method', 'channel', 'channel_note', 'commission_rate', 'commission_amount',
             'subtotal', 'final_sale_price', 'cost', 'profit', 'items',
         ]
 
@@ -131,6 +131,9 @@ class SaleCreateSerializer(serializers.Serializer):
     """Body of POST /sales/create/: one ticket with one or more records."""
     items = SaleLineSerializer(many=True, allow_empty=False)
     payment_method = serializers.ChoiceField(choices=Sale.PAYMENT_METHODS)
+    # Defaults to the store so a POS that doesn't send it yet keeps working.
+    channel = serializers.ChoiceField(choices=Sale.SALE_CHANNELS, default='store')
+    channel_note = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
     # Card commission %; defaults to 4.06. Ignored (0) for cash and transfer.
     commission_rate = serializers.DecimalField(
         max_digits=5, decimal_places=2, min_value=0, max_value=100, required=False,
