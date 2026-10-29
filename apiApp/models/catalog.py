@@ -95,6 +95,9 @@ class Record(models.Model):
     # A record can be in several genres; deleting a genre only takes it off its records.
     generes = models.ManyToManyField(Genere, related_name='records', blank=True)
     cover_image_url = models.URLField(max_length=200, blank=True, null=True)
+    # Small WebP copies of the cover in our storage: {"src", "320", "640"}
+    # (services/thumbnails.py). Only valid while "src" matches cover_image_url.
+    cover_thumbs = models.JSONField(default=dict, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     sell_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)

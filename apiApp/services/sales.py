@@ -2,6 +2,7 @@
 and the Ventas metrics (point of sale + online orders)."""
 import logging
 from collections import defaultdict
+from datetime import timedelta
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 from django.conf import settings
@@ -159,6 +160,55 @@ def _money_fields(bucket):
     }
 
 
+# Longer ranges than this are charted by month (a bar per day stops reading).
+TIMELINE_MAX_DAYS = 92
+
+
+def _timeline(days, date_from, date_to):
+    """Gross / profit / ticket count per period, both channels side by side,
+    every period of the range present (zeros included) so the chart's x axis
+    is continuous. By day, or by month past TIMELINE_MAX_DAYS."""
+    if not days and not (date_from and date_to):
+        return {'grain': 'day', 'points': []}
+    start = date_from or min(days)
+    end = date_to or max(max(days), timezone.localdate())
+    monthly = (end - start).days + 1 > TIMELINE_MAX_DAYS
+    key = (lambda d: d.strftime('%Y-%m')) if monthly else (lambda d: d.isoformat())
+
+    periods = {}
+    day = start
+    while day <= end:
+        periods.setdefault(key(day), {'pos': _bucket(), 'online': _bucket()})
+        day += timedelta(days=1)
+    for date, by_channel in days.items():
+        if key(date) not in periods:
+            continue
+        for name, bucket in by_channel.items():
+            _add(periods[key(date)][name], bucket['gross'], bucket['commission'], count=bucket['count'],
+                 units=bucket['units'], cost=bucket['cost'], units_without_cost=bucket['units_without_cost'])
+
+    def point(period, by_channel):
+        pos, online = by_channel['pos'], by_channel['online']
+        gross = pos['gross'] + online['gross']
+        profit = gross - pos['commission'] - online['commission'] - pos['cost'] - online['cost']
+        return {
+            'period': period,
+            'pos': str(_cents(pos['gross'])),
+            'online': str(_cents(online['gross'])),
+            'profit': str(_cents(profit)),
+            'count': pos['count'] + online['count'],
+        }
+
+    return {'grain': 'month' if monthly else 'day', 'points': [point(p, b) for p, b in periods.items()]}
+
+
+def previous_period(date_from, date_to):
+    """The same number of days right before [date_from, date_to]."""
+    span = (date_to - date_from).days + 1
+    prev_to = date_from - timedelta(days=1)
+    return prev_to - timedelta(days=span - 1), prev_to
+
+
 def sales_metrics(date_from=None, date_to=None):
     """Ventas → Métricas: point-of-sale tickets plus paid online orders.
 
@@ -182,6 +232,10 @@ def sales_metrics(date_from=None, date_to=None):
 
     channels = {'pos': _bucket(), 'online': _bucket()}
     methods = defaultdict(_bucket)
+    # Point-of-sale tickets by where they sold (store, bazar, other).
+    places = defaultdict(_bucket)
+    # Per store day and channel, for the timeline.
+    days = defaultdict(lambda: {'pos': _bucket(), 'online': _bucket()})
     records = {}
     owners = {}
 
@@ -208,7 +262,9 @@ def sales_metrics(date_from=None, date_to=None):
         gross = sum((item.price * item.quantity for item in items), ZERO)
         units = sum(item.quantity for item in items)
         cost, uncosted = _costs(items)
-        for bucket in (channels['pos'], methods[sale.payment_method or 'unknown']):
+        place = places[sale.channel or 'unknown']
+        day = days[timezone.localdate(sale.created_at)]['pos']
+        for bucket in (channels['pos'], methods[sale.payment_method or 'unknown'], place, day):
             _add(bucket, gross, sale.commission_amount, units=units, cost=cost, units_without_cost=uncosted)
         for item in items:
             line = item.price * item.quantity
@@ -223,7 +279,8 @@ def sales_metrics(date_from=None, date_to=None):
         items = list(order.order_items.all())
         units = sum(item.quantity for item in items)
         cost, uncosted = _costs(items)
-        for bucket in (channels['online'], methods['stripe']):
+        day = days[timezone.localdate(order.created_at)]['online']
+        for bucket in (channels['online'], methods['stripe'], day):
             _add(bucket, order.amount - order_shipping, fee, units=units, cost=cost, units_without_cost=uncosted)
         shipping += order_shipping
         for item in items:
@@ -251,6 +308,11 @@ def sales_metrics(date_from=None, date_to=None):
             {'method': name, **_money_fields(bucket)}
             for name, bucket in sorted(methods.items(), key=lambda m: m[1]['gross'], reverse=True)
         ],
+        'timeline': _timeline(days, date_from, date_to),
+        'sale_channels': [
+            {'channel': name, **_money_fields(bucket)}
+            for name, bucket in sorted(places.items(), key=lambda m: m[1]['gross'], reverse=True)
+        ],
         'top_records': [{**row, 'gross': str(_cents(row['gross']))} for row in top_records],
         'owners': [
             {'owner': row['owner'], **_money_fields(row)}
@@ -262,11 +324,17 @@ def sales_metrics(date_from=None, date_to=None):
 # ── Ventas → Exportar CSV ────────────────────────────────────────────────
 
 SALES_CSV_HEADER = [
-    'Fecha', 'Hora', 'Canal', 'Folio', 'Forma de pago', 'Cliente',
+    'Fecha', 'Hora', 'Canal', 'Lugar de venta', 'Folio', 'Forma de pago', 'Cliente',
     'Disco', 'Artista', 'Condición', 'Dueño', 'Correo del dueño',
     'Cantidad', 'Precio unitario', 'Subtotal', 'Comisión', 'Neto',
     'Costo unitario', 'Costo total', 'Ganancia',
 ]
+
+
+def sale_place(sale):
+    """"Bazar · Bazar del Chopo": the channel plus its note, or "Sin registrar"."""
+    place = sale.get_channel_display() or 'Sin registrar'
+    return f'{place} · {sale.channel_note}' if sale.channel_note else place
 
 
 def sales_csv_rows(date_from=None, date_to=None, owner_id=None):
@@ -288,13 +356,13 @@ def sales_csv_rows(date_from=None, date_to=None, owner_id=None):
         sales = sales.filter(created_at__date__lte=date_to)
         orders = orders.filter(created_at__date__lte=date_to)
 
-    def row(created_at, channel, folio, method, customer, item, title, artist, commission):
+    def row(created_at, channel, place, folio, method, customer, item, title, artist, commission):
         when = timezone.localtime(created_at)
         record, owner = item.record, item.owner
         gross = item.price * item.quantity
         cost = item.cost_price * item.quantity
         return created_at, [
-            when.strftime('%Y-%m-%d'), when.strftime('%H:%M'), channel, folio, method, customer,
+            when.strftime('%Y-%m-%d'), when.strftime('%H:%M'), channel, place, folio, method, customer,
             title, artist, record.get_condition_display() if record else '',
             owner.name if owner else 'Sin dueño', owner.email if owner else '',
             item.quantity, f'{item.price:.2f}', f'{gross:.2f}', f'{_cents(commission):.2f}',
@@ -308,7 +376,7 @@ def sales_csv_rows(date_from=None, date_to=None, owner_id=None):
             if owner_id and item.owner_id != owner_id:
                 continue
             rows.append(row(
-                sale.created_at, 'Punto de venta', f'Venta #{sale.id}',
+                sale.created_at, 'Punto de venta', sale_place(sale), f'Venta #{sale.id}',
                 sale.get_payment_method_display() or 'Sin registrar', '', item,
                 item.title or '(disco eliminado)', item.artist, item.commission_amount,
             ))
@@ -319,7 +387,7 @@ def sales_csv_rows(date_from=None, date_to=None, owner_id=None):
                 continue
             record = item.record
             rows.append(row(
-                order.created_at, 'En línea', f'Orden #{order.id}', 'Stripe', order.user_email, item,
+                order.created_at, 'En línea', 'Tienda en línea', f'Orden #{order.id}', 'Stripe', order.user_email, item,
                 record.title if record else '(disco eliminado)',
                 record.artist.name if record and record.artist else '',
                 fee * item.price * item.quantity / order.amount if order.amount else ZERO,

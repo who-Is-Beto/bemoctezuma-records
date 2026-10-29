@@ -18,7 +18,7 @@ from ..serilizers import (
     SalesFilterSerializer,
 )
 from ..services import (
-    SALES_CSV_HEADER, commission_rate_for, notify_sale_owners, sales_csv_rows, sales_metrics, split_commission,
+    SALES_CSV_HEADER, commission_rate_for, previous_period, notify_sale_owners, sales_csv_rows, sales_metrics, split_commission,
     take_stock,
 )
 
@@ -52,7 +52,8 @@ def owner_create(request):
 @permission_classes([IsAuthenticated])
 def sale_create(request):
     """Register a sale from Punto de venta:
-    {"items": [{record, quantity, price?, owner?}], "payment_method", "commission_rate"?}.
+    {"items": [{record, quantity, price?, owner?}], "payment_method", "commission_rate"?,
+    "channel"? (store/bazar/other, default store), "channel_note"?}.
 
     ``owner`` says whose units are sold; required when several owners have the
     record in stock (one owner, or store stock, needs none).
@@ -82,6 +83,8 @@ def sale_create(request):
     with transaction.atomic():
         sale = Sale.objects.create(
             payment_method=data['payment_method'],
+            channel=data['channel'],
+            channel_note=data['channel_note'].strip(),
             commission_rate=rate,
             commission_amount=commission,
             final_sale_price=sum(subtotals, Decimal('0.00')) - commission,
@@ -183,9 +186,13 @@ def sales_metrics_view(request):
 
     filters = SalesFilterSerializer(data=request.query_params)
     filters.is_valid(raise_exception=True)
-    return Response(sales_metrics(
-        filters.validated_data.get('date_from'), filters.validated_data.get('date_to'),
-    ))
+    date_from, date_to = filters.validated_data.get('date_from'), filters.validated_data.get('date_to')
+    metrics = sales_metrics(date_from, date_to)
+    # The same-length period just before, for the "vs. periodo anterior" deltas.
+    metrics['previous'] = (
+        sales_metrics(*previous_period(date_from, date_to))['summary'] if date_from and date_to else None
+    )
+    return Response(metrics)
 
 
 @api_view(['GET'])

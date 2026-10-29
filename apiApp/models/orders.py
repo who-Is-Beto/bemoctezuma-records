@@ -60,9 +60,18 @@ class Sale(models.Model):
         ('card', 'Tarjeta'),
         ('transfer', 'Transferencia'),
     )
+    SALE_CHANNELS = (
+        ('store', 'Tienda física'),
+        ('bazar', 'Bazar'),
+        ('other', 'Otro'),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     # Blank only on sales registered before the payment method was recorded.
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, blank=True, default='')
+    # Where it sold. Blank only on sales registered before the channel was recorded.
+    channel = models.CharField(max_length=20, choices=SALE_CHANNELS, blank=True, default='')
+    # Free detail: which bazar, "Instagram", "Encargo de Juan"...
+    channel_note = models.CharField(max_length=100, blank=True, default='')
     # Card commission, % of the whole ticket (0 for cash/transfer).
     commission_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00'))
     commission_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))

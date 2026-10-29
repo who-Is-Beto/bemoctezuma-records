@@ -196,15 +196,30 @@ class RecordCopyOfMixin(serializers.Serializer):
 PRIVATE_RECORD_FIELDS = ['cost_price', 'final_sale_price']
 
 
+class CoverThumbsField(serializers.Field):
+    """{"320": url, "640": url}: the cover's WebP thumbnails, or {} while they
+    don't exist or were made from a previous cover."""
+
+    def __init__(self, **kwargs):
+        super().__init__(source='*', read_only=True, **kwargs)
+
+    def to_representation(self, record):
+        thumbs = record.cover_thumbs or {}
+        if not record.cover_image_url or thumbs.get('src') != record.cover_image_url:
+            return {}
+        return {width: url for width, url in thumbs.items() if width != 'src'}
+
+
 class RecordCopySerializer(serializers.ModelSerializer):
     """One copy of a release in the condition picker (catalog card, detail page)."""
     sell_price = serializers.SerializerMethodField()
+    cover_thumbs = CoverThumbsField()
 
     class Meta:
         model = Record
         fields = [
             'id', 'slug', 'condition', 'price', 'sell_price', 'discount_porcentage',
-            'stock', 'cover_image_url', 'images',
+            'stock', 'cover_image_url', 'cover_thumbs', 'images',
         ]
 
     def get_sell_price(self, obj):
@@ -221,6 +236,7 @@ class RecordDetailSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     generes = GenereSerializer(many=True, read_only=True)
     sell_price = serializers.SerializerMethodField()
+    cover_thumbs = CoverThumbsField()
     # This record and its copies in other conditions, best condition first.
     copies = serializers.SerializerMethodField()
 
@@ -250,13 +266,14 @@ class RecordListSerializer(serializers.ModelSerializer):
     category = CategoryListSerializer(read_only=True)
     generes = GenereSerializer(many=True, read_only=True)
     sell_price = serializers.SerializerMethodField()
+    cover_thumbs = CoverThumbsField()
     # Copies in other conditions, from context['copies'] (copies_by_group of
     # the page: one query). Nested in cart/wishlist/orders it's always [].
     copies = serializers.SerializerMethodField()
 
     class Meta:
         model = Record
-        fields = ['id', 'title', 'condition', 'category', 'artist', 'generes', 'cover_image_url', 'price', 'sell_price', 'discount_porcentage', 'stock', 'slug', 'images', 'variant_of', 'copies']
+        fields = ['id', 'title', 'condition', 'category', 'artist', 'generes', 'cover_image_url', 'cover_thumbs', 'price', 'sell_price', 'discount_porcentage', 'stock', 'slug', 'images', 'variant_of', 'copies']
 
     def get_sell_price(self, obj):
         """Always return the computed price so stale DB values never leak."""
