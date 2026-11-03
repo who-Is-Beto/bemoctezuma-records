@@ -5,6 +5,7 @@ Keeps the import surface identical to the previous single-file
 view submodules) keeps working unchanged.  The legacy misspelled package name
 is intentional and preserved.
 """
+from .record_requests import RecordRequestSerializer
 from .user import (
     UserRegistrationSerializer,
     UserSerializer,
@@ -37,7 +38,6 @@ from .cart import (
 )
 from .wishlist import (
     WishlistItemSerializer,
-    WishlistSerializer,
 )
 from .reviews import ReviewSerializer
 from .orders import (
@@ -75,7 +75,6 @@ __all__ = [
     'CartSerializer',
     'CartStatSerializer',
     'WishlistItemSerializer',
-    'WishlistSerializer',
     'ReviewSerializer',
     'OrderItemSerializer',
     'OrderSerializer',
@@ -84,4 +83,5 @@ __all__ = [
     'SaleSerializer',
     'SalesFilterSerializer',
     'BazarSerializer',
+    'RecordRequestSerializer',
 ]

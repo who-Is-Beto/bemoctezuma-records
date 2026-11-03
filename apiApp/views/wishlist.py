@@ -1,87 +1,73 @@
-"""Wishlist views: add, remove, list and count wishlist items."""
-from django.shortcuts import get_object_or_404
+"""Wishlist ("Favoritos"): each user saves records to their own list.
+
+Every endpoint acts only on request.user's wishlist: there is no way to read
+or change someone else's. The list is created on the first save.
+"""
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .common import error_response
-from ..models import Record, User, Wishlist, WishlistItem
-from ..serilizers import WishlistSerializer
+from ..models import Record, Wishlist, WishlistItem
+from ..serilizers import WishlistItemSerializer
+
+
+def _wishlist_of(user, create=False):
+    # ponytail: "the oldest list" instead of a unique constraint, so legacy
+    # rows from the old endpoints need no migration; a double-tap race at
+    # most leaves a second, unused list.
+    wishlist = Wishlist.objects.filter(user=user).order_by('id').first()
+    if wishlist is None and create:
+        wishlist = Wishlist.objects.create(user=user)
+    return wishlist
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def wishlist_detail(request):
+    """The user's saved records, newest first: {count, items: [{id, record, added_at}]}."""
+    wishlist = _wishlist_of(request.user)
+    items = (
+        wishlist.wishlist_items
+        .select_related('record__artist', 'record__category')
+        .prefetch_related('record__generes')
+        .order_by('-added_at', '-id')
+        if wishlist else WishlistItem.objects.none()
+    )
+    data = WishlistItemSerializer(items, many=True).data
+    return Response({'count': len(data), 'items': data})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def wishlist_ids(request):
+    """Just the saved record ids, so every card can show its heart filled or not."""
+    wishlist = _wishlist_of(request.user)
+    ids = list(wishlist.wishlist_items.values_list('record_id', flat=True)) if wishlist else []
+    return Response({'record_ids': ids})
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def add_to_wishlist(request):
-    email = request.data.get('email')
-    wishlist_code = request.data.get('wishlist_code')
-    record_id = request.data.get('record_id')
-    user = User.objects.get(email=email) if email else None
-    
-    if not record_id:
+def wishlist_add(request):
+    """Save {record_id}. 201 when added, 200 when it was already saved."""
+    try:
+        record_id = int(request.data.get('record_id'))
+    except (TypeError, ValueError):
         return error_response("record_id is required", status_code=400, code="record_id_required")
+    record = Record.objects.filter(pk=record_id).first()
+    if record is None:
+        return error_response("Ese disco ya no existe.", status_code=404, code="record_not_found")
 
-    if wishlist_code:
-        wishlist, _ = Wishlist.objects.get_or_create(wishlist_code=wishlist_code, defaults={'user': user})
-    else:
-        wishlist = Wishlist.objects.create(user=user)
-    record = Record.objects.get(id=str(record_id))
-    _, created = WishlistItem.objects.get_or_create(wishlist=wishlist, record=record)
-    if not created:
-        return Response({"message": "Record already in wishlist"}, status=200)
-    serializer = WishlistSerializer(wishlist)
-    return Response({"message": "Record added to wishlist", "wishlist": serializer.data}, status=201)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_all_wishlists(_):
-    wishlists = Wishlist.objects.all()
-    serializer = WishlistSerializer(wishlists, many=True)
-    return Response(serializer.data)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_wishlist(request, wishlist_code):
-    email = request.query_params.get('email')
-    user = User.objects.get(email=email) if email else None
-    wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
-    serializer = WishlistSerializer(wishlist)
-    return Response(serializer.data)
+    _, created = WishlistItem.objects.get_or_create(wishlist=_wishlist_of(request.user, create=True), record=record)
+    return Response({'record_id': record.id, 'saved': True}, status=201 if created else 200)
 
 
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
-def remove_from_wishlist(request):
-    wishlist_code = request.data.get('wishlist_code')
-    record_id = request.data.get('record_id')
-
-    if not wishlist_code or not record_id:
-        return error_response(
-            "wishlist_code and record_id are required",
-            status_code=400,
-            code="wishlist_params_required",
-        )
-
-    wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
-    try:
-        wishlist_item = WishlistItem.objects.get(wishlist=wishlist, record_id=record_id)
-    except WishlistItem.DoesNotExist:
-        return error_response("Wishlist item not found", status_code=404, code="wishlist_item_not_found")
-
-    wishlist_item.delete()
-    wishlist.refresh_from_db()
-    serializer = WishlistSerializer(wishlist)
-    return Response({"message": "Record removed from wishlist", "wishlist": serializer.data}, status=200)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_wishlist_count(request):
-    wishlist_code = request.query_params.get('wishlist_code') or request.data.get('wishlist_code')
-    if not wishlist_code:
-        return error_response("wishlist_code is required", status_code=400, code="wishlist_code_required")
-
-    wishlist = get_object_or_404(Wishlist, wishlist_code=wishlist_code)
-    wishlist_count = wishlist.wishlist_items.count()
-    return Response({"wishlist_count": wishlist_count}, status=200)
+def wishlist_remove(request, record_id):
+    """Unsave a record. Idempotent: removing one that isn't saved is not an error."""
+    wishlist = _wishlist_of(request.user)
+    if wishlist:
+        wishlist.wishlist_items.filter(record_id=record_id).delete()
+    return Response(status=204)

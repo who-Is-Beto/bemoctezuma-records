@@ -1,7 +1,10 @@
+import hashlib
 import logging
+import re
 
 import requests
 from django.conf import settings
+from django.core.cache import cache
 
 from .shipping import (
     CD_UNIT_WEIGHT_GRAMS,
@@ -92,6 +95,151 @@ def discogs_search(query, *, page=1, per_page=25):
         'results': results,
         'pagination': data.get('pagination', {}),
     }
+
+
+ALBUM_SEARCH_LIMIT = 8
+ALBUM_SEARCH_CACHE_SECONDS = 60 * 60 * 24
+
+
+def _image(url):
+    # Discogs answers "spacer.gif" when a release has no picture.
+    return url if url and 'spacer.gif' not in url else None
+
+
+def _album(item, kind):
+    artist, _, title = (item.get('title') or '').partition(' - ')
+    if not title:
+        artist, title = '', artist
+    return {
+        'id': item.get('id'),
+        'kind': kind,
+        'artist': artist.strip(),
+        'title': title.strip(),
+        'year': item.get('year') or None,
+        'thumb': _image(item.get('thumb')),
+        'cover': _image(item.get('cover_image')),
+        'url': f"https://www.discogs.com{item['uri']}" if item.get('uri') else None,
+    }
+
+
+def _search(query, kind, per_page):
+    try:
+        resp = requests.get(
+            f'{DISCOGS_API_URL}/database/search',
+            params={'q': query, 'type': kind, 'per_page': per_page, 'page': 1},
+            headers=_discogs_headers(),
+            timeout=DISCOGS_TIMEOUT,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("Discogs %s search failed: %s", kind, exc)
+        raise DiscogsServiceError() from exc
+    return resp.json().get('results', [])
+
+
+def discogs_album_search(query):
+    """One result per album for the public "Encargar un disco" form.
+
+    Masters group every pressing of an album, so they come first. Releases
+    without a master (common for Mexican and indie pressings) only fill in
+    when masters are few. Cached a day per query: the token's 60 req/min is
+    shared with the admin tools.
+    """
+    normalized = ' '.join(query.lower().split())
+    key = 'discogs:albums:' + hashlib.sha1(normalized.encode()).hexdigest()
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    albums = [_album(item, 'master') for item in _search(normalized, 'master', ALBUM_SEARCH_LIMIT)]
+    if len(albums) < ALBUM_SEARCH_LIMIT:
+        seen = {(a['artist'].lower(), a['title'].lower()) for a in albums}
+        for item in _search(normalized, 'release', 25):
+            album = _album(item, 'release')
+            name = (album['artist'].lower(), album['title'].lower())
+            if item.get('master_id') or name in seen:
+                continue  # another pressing of something already listed
+            seen.add(name)
+            albums.append(album)
+            if len(albums) == ALBUM_SEARCH_LIMIT:
+                break
+
+    cache.set(key, albums, ALBUM_SEARCH_CACHE_SECONDS)
+    return albums
+
+
+# Display order of the formats a customer can ask for. Digital files and
+# video (DVD, Blu-ray) aren't records, so they never show up.
+FORMAT_ORDER = ['LP', '12"', '10"', '7"', 'Vinilo', 'CD', 'Casete', 'Box set']
+_QTY_PREFIX = re.compile(r'^\d+\s*[x×]\s*', re.IGNORECASE)
+
+
+def _clean(token):
+    return _QTY_PREFIX.sub('', token.strip())
+
+
+def normalize_formats(name, descriptions):
+    """One Discogs format ("Vinyl" + ["LP", "Album"]) → the labels we offer."""
+    name = _clean(name or '')
+    tags = {_clean(d) for d in descriptions or []}
+    labels = set()
+    if name == 'Vinyl':
+        if 'LP' in tags:
+            labels.add('LP')
+        sizes = {size for size in ('7"', '10"', '12"') if size in tags}
+        if '12"' in sizes and 'LP' in tags:
+            sizes.discard('12"')  # an LP is already 12"
+        labels |= sizes
+        if not labels:
+            labels.add('Vinilo')
+    elif name in ('CD', 'CDr', 'SACD', 'Hybrid'):
+        labels.add('CD')
+    elif name == 'Cassette':
+        labels.add('Casete')
+    elif name == 'Box Set':
+        labels.add('Box set')
+    return labels
+
+
+def _get_json(path, params=None):
+    try:
+        resp = requests.get(f'{DISCOGS_API_URL}{path}', params=params or {},
+                            headers=_discogs_headers(), timeout=DISCOGS_TIMEOUT)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("Discogs %s failed: %s", path, exc)
+        raise DiscogsServiceError() from exc
+    return resp.json()
+
+
+def discogs_album_formats(kind, discogs_id):
+    """Formats an album was actually released in, so the form only offers those.
+
+    Masters: every pressing (first 100 versions cover the real-world formats).
+    Releases without a master: that release's own formats. Cached a day.
+    """
+    key = f'discogs:formats:{kind}:{discogs_id}'
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    labels = set()
+    if kind == 'master':
+        data = _get_json(f'/masters/{discogs_id}/versions', {'per_page': 100, 'page': 1})
+        for version in data.get('versions', []):
+            # "format" lists the descriptions ("LP, Album, Reissue"); the
+            # format name lives in major_formats.
+            descriptions = (version.get('format') or '').split(',')
+            for name in version.get('major_formats') or []:
+                labels |= normalize_formats(name, descriptions)
+    else:
+        data = _get_json(f'/releases/{discogs_id}')
+        for fmt in data.get('formats', []):
+            labels |= normalize_formats(fmt.get('name'), fmt.get('descriptions'))
+
+    formats = [label for label in FORMAT_ORDER if label in labels]
+    cache.set(key, formats, ALBUM_SEARCH_CACHE_SECONDS)
+    return formats
 
 
 def discogs_release_detail(release_id):

@@ -67,12 +67,16 @@ from .cart import (
     remove_cart_item,
     update_cart_quantity,
 )
+from .record_requests import (
+    record_request,
+    record_request_discogs_formats,
+    record_request_discogs_search,
+)
 from .wishlist import (
-    add_to_wishlist,
-    get_all_wishlists,
-    get_wishlist,
-    get_wishlist_count,
-    remove_from_wishlist,
+    wishlist_add,
+    wishlist_detail,
+    wishlist_ids,
+    wishlist_remove,
 )
 from .reviews import (
     add_review,
@@ -168,12 +172,15 @@ __all__ = [
     'remove_all_cart_items',
     'remove_cart_item',
     'update_cart_quantity',
+    # record requests
+    'record_request',
+    'record_request_discogs_formats',
+    'record_request_discogs_search',
     # wishlist
-    'add_to_wishlist',
-    'get_all_wishlists',
-    'get_wishlist',
-    'get_wishlist_count',
-    'remove_from_wishlist',
+    'wishlist_add',
+    'wishlist_detail',
+    'wishlist_ids',
+    'wishlist_remove',
     # reviews
     'add_review',
     'delete_review',

@@ -45,6 +45,8 @@ from .search import (
     search_records,
 )
 from .discogs import (
+    discogs_album_formats,
+    discogs_album_search,
     DiscogsServiceError,
     discogs_release_detail,
     discogs_search,
@@ -94,6 +96,8 @@ __all__ = [
     'search_records',
     # discogs
     'DiscogsServiceError',
+    'discogs_album_formats',
+    'discogs_album_search',
     'discogs_release_detail',
     'discogs_search',
     # config
