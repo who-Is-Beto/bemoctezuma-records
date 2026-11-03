@@ -103,6 +103,9 @@ REST_FRAMEWORK = {
         'password_reset_request': '10/hour',
         'password_reset_confirm': '30/hour',
         'email_verify': '10/hour',
+        'record_request': '5/hour',
+        # Typeahead (debounced on the client); results are cached a day.
+        'record_request_discogs': '30/min',
     },
     'EXCEPTION_HANDLER': 'apiApp.exception_handler.normalized_exception_handler',
 }

@@ -134,3 +134,19 @@ def send_order_notification_email(order):
         logger.info("Seller notification sent for order %s to %s", order.id, recipients)
     except Exception as exc:
         logger.warning("Failed to send seller notification for order %s: %s", order.id, exc)
+
+def send_record_request_email(data):
+    """Forward an "Encargar un disco" request to the store, Reply-To the visitor.
+    Returns False (and logs) when the email can't be sent."""
+    try:
+        send_email(
+            template_name="record_request",
+            context={**data, "frontend_url": settings.FRONTEND_URL},
+            subject=f"Encargo: {data['title']} — {data['artist']}",
+            to=settings.SELLER_NOTIFY_EMAILS,
+            reply_to=[data['email']],
+        )
+        return True
+    except Exception:
+        logger.exception("Record request email failed for %s", data.get('email'))
+        return False
