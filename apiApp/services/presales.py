@@ -13,6 +13,7 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 
 from ..models import PreSaleOption, PreSaleOrder, PreSaleOrderEvent, PreSalePayment
+from . import shipping
 
 logger = logging.getLogger(__name__)
 
@@ -360,3 +361,24 @@ def reopen(order, *, by):
         order.save(update_fields=['status', 'updated_at'])
         _log(order, 'status', 'reabierto', by)
         refresh_status(order, by)
+
+
+def quote_shipping(option, zip_code):
+    """Cheapest preferred-courier quote for one copy of ``option`` to ``zip_code``.
+
+    Returns {'cost', 'courier', 'service', 'title'}. Raises shipping.ShippingQuoteError
+    on upstream failures and PresaleError('shipping_unavailable') when nothing fits.
+    """
+    zip_code = shipping.normalize_zip_code(zip_code)
+    if not zip_code:
+        raise PresaleError('invalid_zip', 'Escribe un código postal válido de 5 dígitos.')
+    quotes = shipping.get_shipping_quotes(zip_code, shipping.build_package_for_option(option))
+    quote = shipping.select_cheapest_quote(quotes)
+    if quote is None:
+        raise PresaleError('shipping_unavailable', f'No hay opciones de envío para el código postal {zip_code}.')
+    return {
+        'cost': Decimal(str(quote.get('total', '0'))).quantize(CENT),
+        'courier': str(quote.get('courier') or ''),
+        'service': str(quote.get('serviceType') or ''),
+        'title': str(quote.get('title') or ''),
+    }

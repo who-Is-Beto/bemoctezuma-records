@@ -86,4 +86,9 @@ urlpatterns = [
     path('records/<int:record_id>/delete/', views.admin_delete_record, name='admin-delete-record'),
     path('user/<str:username>/', views.get_user_details, name='get-user-details'),
     path('stripe-webhook/', views.stripe_webhook, name='stripe-webhook'),
+    # Preventas
+    path('presales/', views.presale_list, name='presale-list'),
+    path('presales/shipping-estimate/', views.presale_shipping_estimate, name='presale-shipping-estimate'),
+    # Keep last among presales/: a slug would swallow the fixed paths above.
+    path('presales/<slug:slug>/', views.presale_detail, name='presale-detail'),
 ]
