@@ -1,6 +1,8 @@
 """Preventas for customers: browse, quote shipping, reserve, settle, own orders,
 and the announcement list. Money rules live in services/presales.py."""
 import logging
+import re
+import time
 from decimal import Decimal
 
 import stripe
@@ -109,6 +111,7 @@ def _checkout(order, *, purpose, item_amount, shipping_amount, item_label):
         cancel_url=f"{frontend}/preventas/{presale.slug}" if purpose == 'reserve' else f"{frontend}/mis-ordenes",
         customer_email=order.user.email if order.user else None,
         client_reference_id=order.code,
+        expires_at=int(time.time()) + svc.CHECKOUT_MINUTES * 60,
         metadata={'kind': 'presale', 'order_id': str(order.id), 'purpose': purpose,
                   'shipping': str(Decimal(shipping_amount).quantize(svc.CENT))},
     )
@@ -309,14 +312,22 @@ def presale_subscription(request):
     return Response({'subscribed': subscribed})
 
 
+CODE_RE = re.compile(r'^PV-[A-HJ-NP-Z2-9]{4}$')
+
+
 @api_view(['GET'])
+@throttle_classes([LiveScopedRateThrottle])
 def presale_order_qr(request, code):
-    """PNG QR of an order code (the code itself is what the customer shows)."""
+    """PNG QR of an order code. Drawn for any well-formed code, so it never
+    reveals which codes exist (the code is what releases the record)."""
     from django.http import HttpResponse
     from ..services.emailing import presale_qr_png
     code = code.upper()
-    if not PreSaleOrder.objects.filter(code=code).exists():
-        return error_response("No encontramos esa preventa.", status_code=404, code="not_found")
+    if not CODE_RE.match(code):
+        return error_response("Código inválido.", status_code=400, code="invalid_code")
     response = HttpResponse(presale_qr_png(code), content_type='image/png')
     response['Cache-Control'] = 'private, max-age=86400'
     return response
+
+
+presale_order_qr.view_class.throttle_scope = 'presale_qr'

@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 DEPOSIT_DAYS = 120
 AFTER_ARRIVAL_DAYS = 15
-HOLD_MINUTES = 30
+HOLD_MINUTES = 35
+# Stripe Checkout's shortest lifetime; the hold outlasts it, so Stripe can't
+# complete a payment after the copy was released.
+CHECKOUT_MINUTES = 31
 TERMS_VERSION = '2026-11'
 
 CENT = Decimal('0.01')
@@ -118,7 +121,8 @@ def is_expirable(order):
         order.status in ('apartado', 'pagado')
         and order.option.arrived_at is not None
         and timezone.localdate() > deadline(order)
-        and (balance(order) > 0 or shipping_pending(order))
+        # Owing only shipping that was never quoted is the store's to fix, not a forfeit.
+        and balance(order) > 0
     )
 
 
@@ -417,7 +421,9 @@ def fulfil_presale_session(session):
     with transaction.atomic():
         option = PreSaleOption.objects.select_for_update().get(pk=order.option_id)
         order.refresh_from_db()
-        if order.status == 'pending_payment' and copies_left(option) <= 0:
+        hold_gone = order.hold_expires_at is None or order.hold_expires_at <= timezone.now()
+        # A live hold already counts this order's own copy; only an expired one can oversell.
+        if order.status == 'pending_payment' and hold_gone and copies_left(option) <= 0:
             # The hold expired and the copy went to someone else: the money is
             # already taken, so keep the order and let the store sort it out.
             order.oversold = True
@@ -426,6 +432,9 @@ def fulfil_presale_session(session):
         record_payment(order, amount, 'stripe', stripe_session_id=session['id'], shipping_amount=shipping_part)
         order.refresh_from_db()
     from .emailing import send_presale_email, send_presale_store_notice
+    if paid_amount(order) > total_due(order):
+        # Two Stripe tabs, or online + cash for the same balance: refund by hand.
+        send_presale_store_notice(order, 'overpaid')
     if metadata.get('purpose') == 'reserve':
         send_presale_email(order, 'reserved')
         send_presale_store_notice(order, 'oversold' if order.oversold else 'new')

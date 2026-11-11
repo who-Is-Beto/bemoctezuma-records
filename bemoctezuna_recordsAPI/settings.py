@@ -108,6 +108,7 @@ REST_FRAMEWORK = {
         'record_request_discogs': '30/min',
         'presale_quote': '20/min',
         'presale_subscribe': '5/hour',
+        'presale_qr': '60/min',
     },
     'EXCEPTION_HANDLER': 'apiApp.exception_handler.normalized_exception_handler',
 }

@@ -25,7 +25,7 @@ class Command(BaseCommand):
             days = svc.days_left(order)
             if days not in REMINDER_DAYS or days in (order.reminders_sent or []):
                 continue
-            if svc.balance(order) <= 0 and not svc.shipping_pending(order):
+            if svc.balance(order) <= 0:
                 continue
             if send_presale_email(order, 'reminder'):
                 order.reminders_sent = [*(order.reminders_sent or []), days]

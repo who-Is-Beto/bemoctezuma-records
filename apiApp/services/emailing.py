@@ -353,13 +353,17 @@ def send_presale_store_notice(order, kind):
     if not recipients:
         return False
     from . import presales as svc
-    title = "Sobreventa en preventa" if kind == 'oversold' else "Nueva preventa apartada"
+    title = {
+        'oversold': "Sobreventa en preventa",
+        'overpaid': "Pago de más en preventa",
+    }.get(kind, "Nueva preventa apartada")
     try:
         send_email(
             template_name="presale_store_notice",
             context={
                 "title": title,
                 "oversold": kind == 'oversold',
+                "overpaid": kind == 'overpaid',
                 "order": order,
                 "presale": order.option.presale,
                 "option": order.option,

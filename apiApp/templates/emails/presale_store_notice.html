@@ -12,6 +12,11 @@
         Pagó después de que su apartado temporal expiró y la última copia ya era de alguien más. Revisa si consigues otra copia o cancela y reembolsa.
     </div>
     {% endif %}
+    {% if overpaid %}
+    <div style="padding:12px 16px;border-radius:12px;background:#fdecea;color:#8a1c12;font-size:14px;margin-bottom:14px;">
+        Pagó más de lo que debía (por ejemplo, liquidó en dos pestañas o en línea y en tienda). Revisa sus pagos y reembolsa la diferencia.
+    </div>
+    {% endif %}
     <div style="color:#0f3a5c;font-size:15px;">Pagado {{ paid }} · Falta {{ balance }}</div>
     <div style="margin-top:18px;"><a href="{{ admin_link }}" style="color:#f08c2c;font-weight:700;">Abrir en Administración →</a></div>
 </div>
