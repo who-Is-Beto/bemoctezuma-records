@@ -67,7 +67,8 @@ def test_detail_draft_visible_to_admin(api_client):
 
 
 @pytest.mark.django_db
-def test_cover_is_absolute_url(api_client):
+def test_cover_is_absolute_url(api_client, settings, tmp_path):
+    settings.MEDIA_ROOT = tmp_path  # keep test uploads out of the repo's media/
     presale = make_presale(cover=SimpleUploadedFile('c.jpg', b'x', content_type='image/jpeg'))
     make_option(presale)
     assert api_client.get('/presales/').json()[0]['cover'].startswith('http://testserver/')

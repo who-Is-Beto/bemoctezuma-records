@@ -62,7 +62,8 @@ def test_role_with_tab_can_list_but_not_pay(api_client):
 
 
 @pytest.mark.django_db
-def test_create_presale_with_options_multipart(admin_client):
+def test_create_presale_with_options_multipart(admin_client, settings, tmp_path):
+    settings.MEDIA_ROOT = tmp_path  # keep test uploads out of the repo's media/
     owner = Owner.objects.create(name='Juan', email='juan@x.com')
     options = [
         {'name': 'Vinilo rojo', 'price': '800', 'min_deposit': '200', 'full_payment_discount': '50',
