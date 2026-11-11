@@ -11,6 +11,14 @@ from .catalog import Artist, Category, Genere, Owner, Record, RecordOwner
 from .common import generate_cart_code
 from .config import SiteConfig
 from .orders import Order, OrderItem, Sale, SaleItem
+from .presales import (
+    PreSale,
+    PreSaleOption,
+    PreSaleOrder,
+    PreSaleOrderEvent,
+    PreSalePayment,
+    PreSaleSubscriber,
+)
 from .reviews import RecordRatingSummary, Review
 from .user import User
 from .wishlist import Wishlist, WishlistItem
@@ -25,6 +33,12 @@ __all__ = [
     'Order',
     'OrderItem',
     'Owner',
+    'PreSale',
+    'PreSaleOption',
+    'PreSaleOrder',
+    'PreSaleOrderEvent',
+    'PreSalePayment',
+    'PreSaleSubscriber',
     'Record',
     'RecordOwner',
     'RecordRatingSummary',

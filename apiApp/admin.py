@@ -32,3 +32,30 @@ admin.site.register([Wishlist, WishlistItem])
 admin.site.register([Cart, CartItem, Review, RecordRatingSummary, Order, OrderItem])
 # No owner edit UI in Administración: this is where a mistyped owner email gets fixed.
 admin.site.register([Owner, Sale, SaleItem])
+
+
+from .models import PreSale, PreSaleOption, PreSaleOrder, PreSalePayment, PreSaleSubscriber
+
+
+class PreSaleOptionInline(admin.TabularInline):
+    model = PreSaleOption
+    extra = 0
+
+
+class PreSaleAdmin(admin.ModelAdmin):
+    list_display = ('title', 'artist', 'status', 'purchase_deadline')
+    inlines = [PreSaleOptionInline]
+admin.site.register(PreSale, PreSaleAdmin)
+
+
+class PreSalePaymentInline(admin.TabularInline):
+    model = PreSalePayment
+    extra = 0
+
+
+class PreSaleOrderAdmin(admin.ModelAdmin):
+    list_display = ('code', 'buyer_name', 'option', 'status', 'reserved_at')
+    search_fields = ('code', 'buyer_name', 'buyer_email')
+    inlines = [PreSalePaymentInline]
+admin.site.register(PreSaleOrder, PreSaleOrderAdmin)
+admin.site.register(PreSaleSubscriber)

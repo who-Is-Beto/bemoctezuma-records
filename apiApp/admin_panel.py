@@ -39,6 +39,12 @@ TABS = [
     ('manage-orders', 'Pedidos', 'tab_manage_orders', [
         ('change_order', 'Actualizar estado y guía de envío'),
     ]),
+    ('presales', 'Preventas', 'tab_presales', [
+        ('add_presale', 'Crear preventas'),
+        ('change_presale', 'Editar, publicar y marcar llegadas'),
+        ('add_presalepayment', 'Registrar pagos y preventas de clientes'),
+        ('change_presaleorder', 'Entregar, cancelar y cambiar estados'),
+    ]),
     # Read-only history; selling itself is change_record in Punto de venta.
     ('sales', 'Ventas', 'tab_sales', []),
     ('manage-users', 'Gestionar usuarios', 'tab_manage_users', [
