@@ -347,6 +347,8 @@ def admin_presale_create_order(request):
         if user:
             order.user = user
             order.save(update_fields=['user'])
+    from ..services.emailing import send_presale_email
+    send_presale_email(order, 'reserved')
     return _order_response(request, order, status_code=201)
 
 

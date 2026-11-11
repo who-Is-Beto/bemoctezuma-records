@@ -420,6 +420,12 @@ def fulfil_presale_session(session):
             logger.warning("Presale order %s paid after its hold expired: oversold", order.code)
         record_payment(order, amount, 'stripe', stripe_session_id=session['id'], shipping_amount=shipping_part)
         order.refresh_from_db()
+    from .emailing import send_presale_email, send_presale_store_notice
+    if metadata.get('purpose') == 'reserve':
+        send_presale_email(order, 'reserved')
+        send_presale_store_notice(order, 'oversold' if order.oversold else 'new')
+    else:
+        send_presale_email(order, 'payment')
     return order
 
 

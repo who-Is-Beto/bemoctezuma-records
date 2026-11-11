@@ -307,3 +307,16 @@ def presale_subscription(request):
             subscriber.save(update_fields=['unsubscribed_at'])
     subscribed = bool(subscriber and subscriber.confirmed_at and subscriber.unsubscribed_at is None)
     return Response({'subscribed': subscribed})
+
+
+@api_view(['GET'])
+def presale_order_qr(request, code):
+    """PNG QR of an order code (the code itself is what the customer shows)."""
+    from django.http import HttpResponse
+    from ..services.emailing import presale_qr_png
+    code = code.upper()
+    if not PreSaleOrder.objects.filter(code=code).exists():
+        return error_response("No encontramos esa preventa.", status_code=404, code="not_found")
+    response = HttpResponse(presale_qr_png(code), content_type='image/png')
+    response['Cache-Control'] = 'private, max-age=86400'
+    return response

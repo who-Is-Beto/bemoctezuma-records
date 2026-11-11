@@ -92,6 +92,7 @@ urlpatterns = [
     path('presales/reserve/', views.presale_reserve, name='presale-reserve'),
     path('presales/checkout/complete/', views.presale_checkout_complete, name='presale-checkout-complete'),
     path('presales/orders/mine/', views.presale_my_orders, name='presale-my-orders'),
+    path('presales/orders/<str:code>/qr.png', views.presale_order_qr, name='presale-order-qr'),
     path('presales/orders/<str:code>/settle/', views.presale_settle, name='presale-settle'),
     path('presales/admin/', views.admin_presales, name='admin-presales'),
     path('presales/admin/orders/', views.admin_presale_create_order, name='admin-presale-create-order'),

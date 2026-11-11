@@ -247,5 +247,130 @@ def announce_presale(presale):
     return len(emails)
 
 
+PRESALE_EMAILS = {
+    # kind: (subject, headline, intro)
+    'reserved': ("Tu preventa está apartada", "¡Listo, ya es tuyo!",
+                 "Guardamos tu copia. Aquí está todo lo que necesitas saber."),
+    'payment': ("Recibimos tu pago", "Recibimos tu pago",
+                "Este es el estado de tu preventa."),
+    'arrived': ("Tu disco ya llegó", "¡Ya llegó tu disco!", None),
+    'reminder': ("Tu apartado vence pronto", "Tu apartado vence pronto", None),
+    'shipped': ("Tu disco va en camino", "Tu disco va en camino",
+                "Ya lo enviamos. Puedes seguir el paquete con la guía."),
+    'delivered': ("Entregamos tu disco", "¡Disfrútalo!",
+                  "Entregamos tu disco. Gracias por apoyar a la tienda."),
+}
+
+
+def presale_qr_png(code, scale=8):
+    """QR for an order code: opens the code in Administración → Preventas."""
+    import io
+    import segno
+    buffer = io.BytesIO()
+    target = _frontend(f"/admin?tab=presales&code={code}")
+    segno.make(target, error='m').save(buffer, kind='png', scale=scale, border=2)
+    return buffer.getvalue()
+
+
+def _qr_attachment(code):
+    from email.mime.image import MIMEImage
+    image = MIMEImage(presale_qr_png(code), _subtype='png')
+    image.add_header('Content-ID', '<presale-qr>')
+    image.add_header('Content-Disposition', 'inline', filename=f'{code}.png')
+    return image
+
+
+def _money_str(value):
+    return f"${value:,.2f}"
+
+
+def _presale_email_context(order, kind):
+    from . import presales as svc
+    option = order.option
+    presale = option.presale
+    balance = svc.balance(order)
+    subject, headline, intro = PRESALE_EMAILS[kind]
+    if kind == 'arrived':
+        if balance > 0:
+            intro = f"Liquida {_money_str(balance)} y es tuyo."
+        elif order.delivery == 'shipping':
+            intro = "Ya está pagado: lo preparamos para enviártelo."
+        else:
+            intro = "Ya está pagado: pasa por él a la tienda con tu código."
+    if kind == 'reminder':
+        intro = f"Te faltan {_money_str(balance)}. Tienes hasta el {svc.deadline(order).strftime('%d/%m/%Y')} para liquidar o pierdes tu apartado."
+    cover = option.image or presale.cover
+    try:
+        cover_url = cover.url if cover else None
+    except ValueError:
+        cover_url = None
+    return {
+        "subject": f"{subject} · {order.code}",
+        "headline": headline,
+        "intro": intro,
+        "code": order.code,
+        "title": presale.title,
+        "artist": presale.artist,
+        "option": option.name,
+        "cover_url": cover_url if cover_url and cover_url.startswith(('http://', 'https://')) else None,
+        "total": _money_str(svc.total_due(order)),
+        "paid": _money_str(svc.paid_amount(order)),
+        "balance": _money_str(balance),
+        "owes": balance > 0,
+        "shipping_pending": svc.shipping_pending(order),
+        "deadline": svc.deadline(order).strftime('%d/%m/%Y'),
+        "arrived": option.arrived_at is not None,
+        "delivery_label": order.get_delivery_display(),
+        "tracking": order.shipping_link,
+        "orders_link": _frontend("/mis-ordenes"),
+        "show_code": kind not in ('delivered',),
+    }
+
+
 def send_presale_email(order, kind):
-    return False
+    """Email the buyer about their presale order. Never raises; False when not sent."""
+    to = (order.user.email if order.user_id else '') or order.buyer_email
+    if not to:
+        return False
+    try:
+        context = _presale_email_context(order, kind)
+        send_email(
+            template_name="presale_order",
+            context=context,
+            subject=context["subject"],
+            to=[to],
+            attachments=[_qr_attachment(order.code)] if context["show_code"] else None,
+        )
+        return True
+    except Exception:
+        logger.exception("Presale %s email failed for order %s", kind, order.code)
+        return False
+
+
+def send_presale_store_notice(order, kind):
+    """Tell the store about a new online reservation (or an oversold one)."""
+    recipients = list(settings.SELLER_NOTIFY_EMAILS)
+    if not recipients:
+        return False
+    from . import presales as svc
+    title = "Sobreventa en preventa" if kind == 'oversold' else "Nueva preventa apartada"
+    try:
+        send_email(
+            template_name="presale_store_notice",
+            context={
+                "title": title,
+                "oversold": kind == 'oversold',
+                "order": order,
+                "presale": order.option.presale,
+                "option": order.option,
+                "paid": _money_str(svc.paid_amount(order)),
+                "balance": _money_str(svc.balance(order)),
+                "admin_link": _frontend(f"/admin?tab=presales&code={order.code}"),
+            },
+            subject=f"{title}: {order.option.presale.title} · {order.code}",
+            to=recipients,
+        )
+        return True
+    except Exception:
+        logger.exception("Presale store notice failed for %s", order.code)
+        return False
