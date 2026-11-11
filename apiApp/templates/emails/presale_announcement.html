@@ -1,0 +1,39 @@
+{% extends "emails/base.html" %}
+
+{% block preheader %}Preventa abierta: {{ presale.title }} de {{ presale.artist }}{% endblock %}
+
+{% block content %}
+<div>
+    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Nueva preventa</div>
+    {% if cover_url %}
+    <img src="{{ cover_url }}" width="520" alt="{{ presale.title }}" style="width:100%;max-width:520px;border-radius:12px;display:block;margin-bottom:16px;">
+    {% endif %}
+    <div style="font-size:26px;font-weight:700;color:#0f3a5c;margin:0 0 4px;">{{ presale.title }}</div>
+    <div style="color:#4f5b67;font-size:16px;margin-bottom:16px;">{{ presale.artist }}</div>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin-bottom:16px;">
+        {% for option in options %}
+        <tr>
+            <td style="padding:8px 0;border-bottom:1px solid #e6edf2;color:#0f3a5c;font-size:15px;">{{ option.name }}</td>
+            <td style="padding:8px 0;border-bottom:1px solid #e6edf2;color:#0f3a5c;font-size:15px;font-weight:700;text-align:right;">${{ option.price|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <div style="padding:14px 16px;border-radius:12px;background:#f3f7fa;color:#0f3a5c;font-size:14px;line-height:1.7;">
+        Apártalo desde ${{ min_deposit|floatformat:2 }}.<br>
+        {% if max_discount %}Si pagas completo te ahorras ${{ max_discount|floatformat:2 }}.<br>{% endif %}
+        Puedes apartar hasta el {{ presale.purchase_deadline|date:"j \d\e F" }}.
+        {% if presale.estimated_arrival %}<br>Llega aprox. {{ presale.estimated_arrival }}.{% endif %}
+    </div>
+
+    <div style="margin-top:20px;">
+        <a href="{{ presale_link }}" style="display:inline-block;background:#f08c2c;color:#ffffff;font-weight:700;padding:12px 22px;border-radius:999px;text-decoration:none;">Ver preventa</a>
+    </div>
+
+    <p style="color:#8a96a3;font-size:12px;line-height:1.6;margin:24px 0 0;">
+        Recibes este correo porque pediste que te avisáramos de las preventas.
+        <a href="{{ unsubscribe_link }}" style="color:#8a96a3;">Ya no quiero recibir esto</a>.
+    </p>
+</div>
+{% endblock %}

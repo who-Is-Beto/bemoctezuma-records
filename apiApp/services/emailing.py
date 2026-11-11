@@ -1,6 +1,8 @@
 import logging
+import threading
 
 from django.conf import settings
+from django.core import signing
 
 from ..emails import send_email
 
@@ -152,14 +154,97 @@ def send_record_request_email(data):
         return False
 
 
-# ── Preventas (filled in by the presale email tasks) ───────────────────────
+# ── Preventas ──────────────────────────────────────────────────────────────
+
+def _frontend(path):
+    return f"{settings.FRONTEND_URL.rstrip('/')}{path}"
+
+
+def presale_unsubscribe_link(email):
+    token = signing.dumps(email, salt='presale-unsubscribe')
+    return _frontend(f"/preventas/baja?token={token}")
+
+
+def send_presale_subscribe_confirmation(email):
+    token = signing.dumps(email, salt='presale-subscribe')
+    try:
+        send_email(
+            template_name="presale_subscribe_confirm",
+            context={"confirm_link": _frontend(f"/preventas/confirmar?token={token}")},
+            subject="Confirma tu suscripción a las preventas",
+            to=[email],
+        )
+        return True
+    except Exception:
+        logger.exception("Presale subscription confirmation failed for %s", email)
+        return False
+
+
+def _subscribers():
+    from ..models import PreSaleSubscriber
+    return PreSaleSubscriber.objects.filter(confirmed_at__isnull=False, unsubscribed_at__isnull=True)
+
 
 def presale_recipient_count():
-    return 0
+    return _subscribers().count()
+
+
+def _presale_cover(presale):
+    if not presale.cover:
+        return None
+    try:
+        url = presale.cover.url
+    except ValueError:
+        return None
+    return url if url.startswith(('http://', 'https://')) else None
+
+
+def _send_announcements(presale_id, emails):
+    from ..models import PreSale
+    presale = PreSale.objects.prefetch_related('options').get(pk=presale_id)
+    options = [o for o in presale.options.all() if o.is_active]
+    context = {
+        "presale": presale,
+        "options": options,
+        "price_from": min((o.price for o in options), default=None),
+        "max_discount": max((o.full_payment_discount for o in options), default=0),
+        "min_deposit": min((o.min_deposit for o in options), default=None),
+        "cover_url": _presale_cover(presale),
+        "presale_link": _frontend(f"/preventas/{presale.slug}"),
+    }
+    sent = 0
+    for email in emails:
+        unsubscribe = presale_unsubscribe_link(email)
+        try:
+            send_email(
+                template_name="presale_announcement",
+                context={**context, "unsubscribe_link": unsubscribe},
+                subject=f"Nueva preventa: {presale.title} — {presale.artist}",
+                to=[email],
+                headers={"List-Unsubscribe": f"<{unsubscribe}>"},
+            )
+            sent += 1
+        except Exception:
+            logger.exception("Presale announcement to %s failed", email)
+    logger.info("Presale %s announced to %s/%s subscribers", presale_id, sent, len(emails))
 
 
 def announce_presale(presale):
-    return 0
+    """Email every confirmed subscriber once per presale. Returns how many will get it.
+
+    Runs in a background thread (no task queue here) so publishing doesn't wait
+    on one email per subscriber. ``announced_at`` is claimed first and atomically,
+    so a double click can't announce twice.
+    """
+    from django.utils import timezone
+    from ..models import PreSale
+    claimed = PreSale.objects.filter(pk=presale.pk, announced_at__isnull=True).update(announced_at=timezone.now())
+    if not claimed:
+        return 0
+    emails = list(_subscribers().values_list('email', flat=True))
+    if emails:
+        threading.Thread(target=_send_announcements, args=(presale.pk, emails), daemon=True).start()
+    return len(emails)
 
 
 def send_presale_email(order, kind):

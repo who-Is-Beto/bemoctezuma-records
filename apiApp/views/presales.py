@@ -5,6 +5,10 @@ from decimal import Decimal
 
 import stripe
 from django.conf import settings
+from django.core import signing
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
+from django.utils import timezone
 from django.db.models import Prefetch
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated
@@ -12,9 +16,10 @@ from rest_framework.response import Response
 
 from .common import _require_email_verified, error_response
 from ..admin_panel import ACCESS
-from ..models import PreSale, PreSaleOption, PreSaleOrder
+from ..models import PreSale, PreSaleOption, PreSaleOrder, PreSaleSubscriber
 from ..serilizers import PreSalePublicSerializer, presale_order_payload
 from ..services import presales as svc
+from ..services.emailing import send_presale_subscribe_confirmation
 from ..services.shipping import ShippingQuoteError
 from ..throttling import LiveScopedRateThrottle
 
@@ -229,3 +234,76 @@ def presale_my_orders(request):
     orders = PreSaleOrder.objects.select_related('option__presale').prefetch_related('payments').filter(
         user=request.user).exclude(status='pending_payment')
     return Response([presale_order_payload(o, request) for o in orders])
+
+
+# ── announcement list ──────────────────────────────────────────────────────
+
+SUBSCRIBE_OK = {"message": "Revisa tu correo para confirmar."}
+CONFIRM_MAX_AGE = 7 * 24 * 3600
+
+
+@api_view(['POST'])
+@throttle_classes([LiveScopedRateThrottle])
+def presale_subscribe(request):
+    if str(request.data.get('website') or '').strip():
+        return Response(SUBSCRIBE_OK)  # bot: pretend it worked
+    email = str(request.data.get('email') or '').strip().lower()
+    try:
+        validate_email(email)
+    except DjangoValidationError:
+        return error_response("Escribe un correo válido.", status_code=400, code="invalid_email")
+    subscriber, _ = PreSaleSubscriber.objects.get_or_create(email=email)
+    if subscriber.confirmed_at is None or subscriber.unsubscribed_at is not None:
+        # Same answer either way: the response never tells whether an email is subscribed.
+        send_presale_subscribe_confirmation(email)
+    return Response(SUBSCRIBE_OK)
+
+
+presale_subscribe.view_class.throttle_scope = 'presale_subscribe'
+
+
+def _email_from_token(token, salt, max_age=None):
+    try:
+        return signing.loads(str(token or ''), salt=salt, max_age=max_age)
+    except signing.BadSignature:
+        return None
+
+
+@api_view(['POST'])
+def presale_subscribe_confirm(request):
+    email = _email_from_token(request.data.get('token'), 'presale-subscribe', CONFIRM_MAX_AGE)
+    if not email:
+        return error_response("Este enlace ya no es válido. Suscríbete de nuevo.", status_code=400, code="invalid_token")
+    subscriber, _ = PreSaleSubscriber.objects.get_or_create(email=email)
+    subscriber.confirmed_at = timezone.now()
+    subscriber.unsubscribed_at = None
+    subscriber.save(update_fields=['confirmed_at', 'unsubscribed_at'])
+    return Response({"subscribed": True})
+
+
+@api_view(['POST'])
+def presale_unsubscribe(request):
+    email = _email_from_token(request.data.get('token'), 'presale-unsubscribe')
+    if not email:
+        return error_response("Este enlace no es válido.", status_code=400, code="invalid_token")
+    PreSaleSubscriber.objects.filter(email=email).update(unsubscribed_at=timezone.now())
+    return Response({"subscribed": False})
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def presale_subscription(request):
+    email = (request.user.email or '').strip().lower()
+    subscriber = PreSaleSubscriber.objects.filter(email=email).first()
+    if request.method == 'PATCH' and email:
+        if request.data.get('subscribed') is True:
+            subscriber = subscriber or PreSaleSubscriber(email=email)
+            subscriber.user = request.user
+            subscriber.confirmed_at = subscriber.confirmed_at or timezone.now()
+            subscriber.unsubscribed_at = None
+            subscriber.save()
+        elif subscriber:
+            subscriber.unsubscribed_at = timezone.now()
+            subscriber.save(update_fields=['unsubscribed_at'])
+    subscribed = bool(subscriber and subscriber.confirmed_at and subscriber.unsubscribed_at is None)
+    return Response({'subscribed': subscribed})

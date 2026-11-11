@@ -1,0 +1,17 @@
+{% extends "emails/base.html" %}
+
+{% block preheader %}Un clic y te avisamos de cada preventa nueva{% endblock %}
+
+{% block content %}
+<div>
+    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Preventas</div>
+    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">¿Te avisamos de las preventas?</div>
+    <p style="color:#4f5b67;font-size:15px;line-height:1.6;margin:0 0 20px;">
+        Confirma tu correo y te escribimos cada vez que abramos una preventa: el disco, el precio y hasta cuándo puedes apartarlo.
+    </p>
+    <a href="{{ confirm_link }}" style="display:inline-block;background:#f08c2c;color:#ffffff;font-weight:700;padding:12px 22px;border-radius:999px;text-decoration:none;">Sí, avísenme</a>
+    <p style="color:#8a96a3;font-size:13px;line-height:1.6;margin:20px 0 0;">
+        Si no pediste esto, ignora este correo y no te escribiremos.
+    </p>
+</div>
+{% endblock %}

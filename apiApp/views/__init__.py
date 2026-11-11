@@ -147,6 +147,10 @@ from .presales import (
     presale_reserve,
     presale_settle,
     presale_shipping_estimate,
+    presale_subscribe,
+    presale_subscribe_confirm,
+    presale_unsubscribe,
+    presale_subscription,
 )
 
 __all__ = [
@@ -256,6 +260,10 @@ __all__ = [
     'presale_settle',
     'presale_list',
     'presale_shipping_estimate',
+    'presale_subscribe',
+    'presale_subscribe_confirm',
+    'presale_unsubscribe',
+    'presale_subscription',
     # presales admin
     'admin_presale_add_option',
     'admin_presale_add_payment',

@@ -101,7 +101,8 @@ def _resolve_recipients(to):
     return resolved
 
 
-def send_email(*, template_name, context, subject, to, from_email=None, cc=None, bcc=None, reply_to=None):
+def send_email(*, template_name, context, subject, to, from_email=None, cc=None, bcc=None, reply_to=None,
+               headers=None, attachments=None):
     """Render and send a multipart (text + html) transactional email.
     Raises on failure so callers own their error policy."""
     html_body = render_email_html(template_name, context)
@@ -116,8 +117,11 @@ def send_email(*, template_name, context, subject, to, from_email=None, cc=None,
         cc=cc or [],
         bcc=bcc or [],
         reply_to=reply_to or [],
+        headers=headers or {},
     )
     email.attach_alternative(html_body, "text/html")
+    for attachment in attachments or []:
+        email.attach(attachment)
     try:
         email.send(fail_silently=False)
         logger.info("Email sent: %r to %s", subject, ", ".join(recipients))

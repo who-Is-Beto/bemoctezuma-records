@@ -439,3 +439,10 @@ def requote_shipping(order, *, by=None):
     _log(order, 'shipping_quote', f"${quote['cost']} · {quote['title']}", by)
     refresh_status(order, by)
     return order
+
+
+def link_orders_to_user(user):
+    """Attach admin-registered orders (Instagram / store) to the account that owns that email."""
+    if not user.email:
+        return 0
+    return PreSaleOrder.objects.filter(user__isnull=True, buyer_email__iexact=user.email).update(user=user)

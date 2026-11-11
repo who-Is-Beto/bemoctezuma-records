@@ -13,6 +13,8 @@ from rest_framework.throttling import ScopedRateThrottle
 
 from .common import _build_token_response, _build_verification_link, error_response
 from ..emails import send_password_recovery_email, send_verification_email, send_welcome_email
+from ..models import PreSaleSubscriber
+from ..services.presales import link_orders_to_user
 from ..serilizers import (
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
@@ -171,6 +173,9 @@ def verify_email(request):
 
     user.email_verified = True
     user.save(update_fields=['email_verified'])
+    # The email is proven now: attach presale orders the store registered for it.
+    link_orders_to_user(user)
+    PreSaleSubscriber.objects.filter(email=user.email.lower(), user__isnull=True).update(user=user)
     logger.info("Email verified for user %s", user.id)
     return Response({"message": "Email verified successfully", "email_verified": True}, status=200)
 

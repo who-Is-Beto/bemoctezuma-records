@@ -113,6 +113,10 @@ urlpatterns = [
     path('presales/admin/<int:presale_id>/arrived/', views.admin_presale_arrived, name='admin-presale-arrived'),
     path('presales/admin/<int:presale_id>/extend/', views.admin_presale_extend, name='admin-presale-extend'),
     path('presales/admin/<int:presale_id>/orders/', views.admin_presale_orders, name='admin-presale-orders'),
+    path('presales/subscribe/', views.presale_subscribe, name='presale-subscribe'),
+    path('presales/subscribe/confirm/', views.presale_subscribe_confirm, name='presale-subscribe-confirm'),
+    path('presales/unsubscribe/', views.presale_unsubscribe, name='presale-unsubscribe'),
+    path('presales/subscription/', views.presale_subscription, name='presale-subscription'),
     # Keep last among presales/: a slug would swallow the fixed paths above.
     path('presales/<slug:slug>/', views.presale_detail, name='presale-detail'),
 ]
