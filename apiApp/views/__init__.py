@@ -117,7 +117,15 @@ from .sales import (
     sales_metrics_view,
     sales_export,
 )
-from .presales import presale_detail, presale_list, presale_shipping_estimate
+from .presales import (
+    presale_checkout_complete,
+    presale_detail,
+    presale_list,
+    presale_my_orders,
+    presale_reserve,
+    presale_settle,
+    presale_shipping_estimate,
+)
 
 __all__ = [
     # common helpers (kept for any module importing them from apiApp.views)
@@ -219,7 +227,11 @@ __all__ = [
     'sales_metrics_view',
     'sales_export',
     # presales
+    'presale_checkout_complete',
     'presale_detail',
+    'presale_my_orders',
+    'presale_reserve',
+    'presale_settle',
     'presale_list',
     'presale_shipping_estimate',
 ]

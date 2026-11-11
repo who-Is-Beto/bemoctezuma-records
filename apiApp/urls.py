@@ -89,6 +89,10 @@ urlpatterns = [
     # Preventas
     path('presales/', views.presale_list, name='presale-list'),
     path('presales/shipping-estimate/', views.presale_shipping_estimate, name='presale-shipping-estimate'),
+    path('presales/reserve/', views.presale_reserve, name='presale-reserve'),
+    path('presales/checkout/complete/', views.presale_checkout_complete, name='presale-checkout-complete'),
+    path('presales/orders/mine/', views.presale_my_orders, name='presale-my-orders'),
+    path('presales/orders/<str:code>/settle/', views.presale_settle, name='presale-settle'),
     # Keep last among presales/: a slug would swallow the fixed paths above.
     path('presales/<slug:slug>/', views.presale_detail, name='presale-detail'),
 ]

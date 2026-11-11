@@ -382,3 +382,42 @@ def quote_shipping(option, zip_code):
         'service': str(quote.get('serviceType') or ''),
         'title': str(quote.get('title') or ''),
     }
+
+
+def shipping_paid(order):
+    total = order.payments.filter(voided_at__isnull=True).aggregate(s=Sum('shipping_amount'))['s']
+    return (total or ZERO).quantize(CENT)
+
+
+def shipping_due(order):
+    """Part of the balance that pays shipping (only once shipping_cost is known)."""
+    if order.shipping_cost is None:
+        return ZERO
+    return min(max(order.shipping_cost - shipping_paid(order), ZERO), balance(order))
+
+
+def fulfil_presale_session(session):
+    """Record a paid Stripe Checkout session for a presale. Safe to call twice."""
+    if session.get('payment_status') != 'paid':
+        return None
+    metadata = session.get('metadata') or {}
+    order = PreSaleOrder.objects.select_related('option__presale').filter(pk=metadata.get('order_id')).first()
+    if order is None:
+        logger.error("Presale session %s references missing order %r", session.get('id'), metadata.get('order_id'))
+        return None
+    if PreSalePayment.objects.filter(stripe_checkout_session_id=session['id']).exists():
+        return order
+    amount = Decimal(session.get('amount_total') or 0) / Decimal(100)
+    shipping_part = _money(metadata.get('shipping') or '0')
+    with transaction.atomic():
+        option = PreSaleOption.objects.select_for_update().get(pk=order.option_id)
+        order.refresh_from_db()
+        if order.status == 'pending_payment' and copies_left(option) <= 0:
+            # The hold expired and the copy went to someone else: the money is
+            # already taken, so keep the order and let the store sort it out.
+            order.oversold = True
+            order.save(update_fields=['oversold', 'updated_at'])
+            logger.warning("Presale order %s paid after its hold expired: oversold", order.code)
+        record_payment(order, amount, 'stripe', stripe_session_id=session['id'], shipping_amount=shipping_part)
+        order.refresh_from_db()
+    return order
