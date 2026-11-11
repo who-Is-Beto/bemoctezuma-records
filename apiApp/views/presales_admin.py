@@ -265,6 +265,8 @@ def admin_presale_extend(request, presale_id):
     except ValueError:
         return error_response("Elige una fecha válida.", status_code=400, code="invalid_date")
     orders = PreSaleOrder.objects.filter(option__presale_id=presale_id, status__in=('apartado', 'pagado', 'listo'))
+    # Extending never shortens: an order that already has a later date keeps it.
+    orders = [o for o in orders if o.deadline_override is None or o.deadline_override < until]
     for order in orders:
         order.deadline_override = until
         order.save(update_fields=['deadline_override', 'updated_at'])

@@ -246,3 +246,14 @@ def test_requote_sets_shipping_cost(admin_client):
     with mock.patch('apiApp.services.shipping.get_shipping_quotes', return_value=quote):
         res = admin_client.post(f'/presales/admin/orders/{order.id}/shipping-quote/', format='json')
     assert res.status_code == 200 and res.json()['shipping_cost'] == '170.00'
+
+
+@pytest.mark.django_db
+def test_extend_never_shortens_a_later_override(admin_client):
+    option = make_option()
+    later = timezone.localdate() + timedelta(days=400)
+    order = make_order(option, deadline_override=later)
+    admin_client.post(f'/presales/admin/{option.presale_id}/extend/',
+                      {'until': (timezone.localdate() + timedelta(days=200)).isoformat()}, format='json')
+    order.refresh_from_db()
+    assert order.deadline_override == later
