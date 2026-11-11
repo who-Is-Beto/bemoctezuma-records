@@ -135,3 +135,130 @@ def presale_order_payload(order, request=None):
         'reserved_at': order.reserved_at.isoformat(),
         'delivered_at': order.delivered_at.isoformat() if order.delivered_at else None,
     }
+
+
+class PreSaleOptionAdminSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+    copies_left = serializers.SerializerMethodField()
+    taken = serializers.SerializerMethodField()
+    has_orders = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PreSaleOption
+        fields = ['id', 'name', 'image', 'image_url', 'category', 'weight_grams', 'price', 'min_deposit',
+                  'full_payment_discount', 'cost_price', 'owner', 'copies', 'is_active', 'position',
+                  'arrived_at', 'copies_left', 'taken', 'has_orders']
+        read_only_fields = ['arrived_at']
+        extra_kwargs = {'image': {'write_only': True, 'required': False}}
+
+    def get_image_url(self, obj):
+        return media_url(obj.image, self.context.get('request'))
+
+    def get_copies_left(self, obj):
+        return svc.copies_left(obj)
+
+    def get_taken(self, obj):
+        return obj.copies - svc.copies_left(obj)
+
+    def get_has_orders(self, obj):
+        return obj.orders.exists()
+
+    def validate(self, attrs):
+        instance = self.instance or PreSaleOption()
+        for key, value in attrs.items():
+            setattr(instance, key, value)
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        try:
+            instance.clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict)
+        return attrs
+
+
+class PreSaleAdminSerializer(serializers.ModelSerializer):
+    cover_url = serializers.SerializerMethodField()
+    options = serializers.SerializerMethodField()
+    stats = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PreSale
+        fields = ['id', 'slug', 'title', 'artist', 'description', 'cover', 'cover_url', 'purchase_deadline',
+                  'estimated_arrival', 'status', 'announced_at', 'created_at', 'options', 'stats']
+        read_only_fields = ['slug', 'status', 'announced_at', 'created_at']
+        extra_kwargs = {'cover': {'write_only': True, 'required': False}}
+
+    def get_cover_url(self, obj):
+        return media_url(obj.cover, self.context.get('request'))
+
+    def get_options(self, obj):
+        return PreSaleOptionAdminSerializer(obj.options.all(), many=True, context=self.context).data
+
+    def get_stats(self, obj):
+        return presale_totals(obj)
+
+
+def presale_totals(presale):
+    from ..models import PreSaleOrder
+    orders = PreSaleOrder.objects.filter(option__presale=presale).exclude(status='pending_payment')
+    reserved = paid_full = expired = 0
+    collected = owed = svc.ZERO
+    for order in orders.prefetch_related('payments').select_related('option'):
+        paid = svc.paid_amount(order)
+        if order.status in ('cancelado', 'vencido'):
+            expired += order.status == 'vencido'
+            collected += paid if order.status == 'vencido' else svc.ZERO
+            continue
+        reserved += 1
+        collected += paid
+        owed += svc.balance(order)
+        paid_full += svc.balance(order) == 0 and not svc.shipping_pending(order)
+    copies = sum(o.copies for o in presale.options.all())
+    return {
+        'copies': copies,
+        'reserved': reserved,
+        'paid_full': paid_full,
+        'expired': expired,
+        'collected': money(collected),
+        'owed': money(owed),
+    }
+
+
+def presale_admin_order_payload(order, request=None):
+    data = presale_order_payload(order, request)
+    data.update({
+        'id': order.id,
+        'presale_id': order.option.presale_id,
+        'buyer_name': order.buyer_name,
+        'buyer_email': order.buyer_email or (order.user.email if order.user else ''),
+        'buyer_phone': order.buyer_phone,
+        'has_account': order.user_id is not None,
+        'source': order.source,
+        'source_label': order.get_source_display(),
+        'shipping_details': order.shipping_details,
+        'shipping_courier': order.shipping_courier,
+        'deadline_override': order.deadline_override.isoformat() if order.deadline_override else None,
+        'is_expirable': svc.is_expirable(order),
+        'oversold': order.oversold,
+        'delivered_by': order.delivered_by.get_username() if order.delivered_by else None,
+        'payments': [
+            {
+                'id': p.id,
+                'amount': money(p.amount),
+                'method': p.method,
+                'method_label': p.get_method_display(),
+                'note': p.note,
+                'created_at': p.created_at.isoformat(),
+                'registered_by': p.registered_by.get_username() if p.registered_by else None,
+                'voided': p.voided_at is not None,
+                'void_reason': p.void_reason,
+                'voided_by': p.voided_by.get_username() if p.voided_by else None,
+            }
+            for p in order.payments.all()
+        ],
+        'events': [
+            {'kind': e.kind, 'note': e.note, 'actor': e.actor.get_username() if e.actor else None,
+             'created_at': e.created_at.isoformat()}
+            for e in order.events.all()
+        ],
+    })
+    return data

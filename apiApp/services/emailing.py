@@ -150,3 +150,17 @@ def send_record_request_email(data):
     except Exception:
         logger.exception("Record request email failed for %s", data.get('email'))
         return False
+
+
+# ── Preventas (filled in by the presale email tasks) ───────────────────────
+
+def presale_recipient_count():
+    return 0
+
+
+def announce_presale(presale):
+    return 0
+
+
+def send_presale_email(order, kind):
+    return False

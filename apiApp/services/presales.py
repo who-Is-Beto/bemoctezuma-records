@@ -421,3 +421,21 @@ def fulfil_presale_session(session):
         record_payment(order, amount, 'stripe', stripe_session_id=session['id'], shipping_amount=shipping_part)
         order.refresh_from_db()
     return order
+
+
+def requote_shipping(order, *, by=None):
+    """Final Envíos Perros quote for a shipping order (when the record arrives)."""
+    if order.delivery != 'shipping':
+        raise PresaleError('not_shipping')
+    if order.status in LOCKED_STATUSES:
+        raise PresaleError('invalid_status')
+    if shipping_paid(order) > 0:
+        # Shipping already charged (paid in full at reservation): that amount is final.
+        return order
+    quote = quote_shipping(order.option, (order.shipping_details or {}).get('zip'))
+    order.shipping_cost = quote['cost']
+    order.shipping_courier, order.shipping_service = quote['courier'], quote['service']
+    order.save(update_fields=['shipping_cost', 'shipping_courier', 'shipping_service', 'updated_at'])
+    _log(order, 'shipping_quote', f"${quote['cost']} · {quote['title']}", by)
+    refresh_status(order, by)
+    return order
