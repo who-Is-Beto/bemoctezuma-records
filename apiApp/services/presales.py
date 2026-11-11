@@ -132,10 +132,12 @@ def refresh_status(order, actor=None):
     previous = order.status
     if paid <= 0 and order.status == 'pending_payment':
         return
+    newly_paid = False
     if paid >= order.item_price:
         status = 'pagado'
         if order.paid_at is None:
             order.paid_at = timezone.now()
+            newly_paid = True
     else:
         status = 'apartado'
         order.paid_at = None
@@ -148,6 +150,9 @@ def refresh_status(order, actor=None):
     order.save(update_fields=['status', 'paid_at', 'hold_expires_at', 'updated_at'])
     if status != previous:
         _log(order, 'status', f'{previous} → {status}', actor)
+    if newly_paid and order.option.owner_id and not order.owner_notified:
+        from .sales import notify_presale_owner
+        notify_presale_owner(order)
 
 
 def split_amount(option, amount, delivery, shipping_quote):

@@ -1,5 +1,5 @@
 """Sales registered in Punto de venta: card commission, owner notifications
-and the Ventas metrics (point of sale + online orders)."""
+and the Ventas metrics (point of sale + online orders + paid presales)."""
 import logging
 from collections import defaultdict
 from datetime import timedelta
@@ -9,7 +9,9 @@ from django.conf import settings
 from django.utils import timezone
 
 from ..emails import send_email
-from ..models import Order, Sale
+from types import SimpleNamespace
+
+from ..models import Order, PreSaleOrder, Sale
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +112,52 @@ def notify_sale_owners(sale):
 ONLINE_SALE_STATUSES = ('paid', 'shipped', 'delivered')
 
 
+def _paid_presales(date_from=None, date_to=None):
+    """Presale orders whose record price is fully paid, on the store day it got paid."""
+    orders = PreSaleOrder.objects.filter(paid_at__isnull=False).exclude(status='cancelado').select_related(
+        'option__presale', 'option__owner').prefetch_related('payments')
+    if date_from:
+        orders = orders.filter(paid_at__date__gte=date_from)
+    if date_to:
+        orders = orders.filter(paid_at__date__lte=date_to)
+    return orders
+
+
+def presale_figures(order):
+    """Ventas numbers of a paid presale order.
+
+    Gross = item_price (shipping is pass-through, reported apart). Commission =
+    estimated Stripe fee on each online payment; store payments carry none.
+    Gross is split across payment methods by what each line paid for the record.
+    """
+    payments = [p for p in order.payments.all() if p.voided_at is None]
+    item_paid = {}
+    commission = ZERO
+    shipping = ZERO
+    for payment in payments:
+        item_paid[payment.method] = item_paid.get(payment.method, ZERO) + payment.amount - payment.shipping_amount
+        shipping += payment.shipping_amount
+        if payment.method == 'stripe':
+            commission += estimated_stripe_fee(payment.amount)
+    gross = order.item_price
+    total_item = sum(item_paid.values(), ZERO)
+    split = {m: _cents(gross * amount / total_item) for m, amount in item_paid.items()} if total_item else {}
+    labels = dict(order.payments.model.METHODS)
+    cost = order.option.cost_price or ZERO
+    return {
+        'gross': gross,
+        'commission': commission,
+        'shipping': shipping,
+        'cost': cost,
+        'uncosted': 0 if cost else 1,
+        'split': split,
+        'dominant': max(split, key=split.get) if split else 'unknown',
+        'method_label': ' + '.join(labels.get(m, m) for m in item_paid),
+        'line': SimpleNamespace(record=None, owner=order.option.owner, price=gross, quantity=1,
+                                cost_price=cost),
+    }
+
+
 def _cents(amount):
     return amount.quantize(CENT, rounding=ROUND_HALF_UP)
 
@@ -165,7 +213,7 @@ TIMELINE_MAX_DAYS = 92
 
 
 def _timeline(days, date_from, date_to):
-    """Gross / profit / ticket count per period, both channels side by side,
+    """Gross / profit / ticket count per period, every channel side by side,
     every period of the range present (zeros included) so the chart's x axis
     is continuous. By day, or by month past TIMELINE_MAX_DAYS."""
     if not days and not (date_from and date_to):
@@ -178,7 +226,7 @@ def _timeline(days, date_from, date_to):
     periods = {}
     day = start
     while day <= end:
-        periods.setdefault(key(day), {'pos': _bucket(), 'online': _bucket()})
+        periods.setdefault(key(day), {'pos': _bucket(), 'online': _bucket(), 'presale': _bucket()})
         day += timedelta(days=1)
     for date, by_channel in days.items():
         if key(date) not in periods:
@@ -188,15 +236,16 @@ def _timeline(days, date_from, date_to):
                  units=bucket['units'], cost=bucket['cost'], units_without_cost=bucket['units_without_cost'])
 
     def point(period, by_channel):
-        pos, online = by_channel['pos'], by_channel['online']
-        gross = pos['gross'] + online['gross']
-        profit = gross - pos['commission'] - online['commission'] - pos['cost'] - online['cost']
+        buckets = by_channel.values()
+        gross = sum((b['gross'] for b in buckets), ZERO)
+        profit = gross - sum((b['commission'] + b['cost'] for b in buckets), ZERO)
         return {
             'period': period,
-            'pos': str(_cents(pos['gross'])),
-            'online': str(_cents(online['gross'])),
+            'pos': str(_cents(by_channel['pos']['gross'])),
+            'online': str(_cents(by_channel['online']['gross'])),
+            'presale': str(_cents(by_channel['presale']['gross'])),
             'profit': str(_cents(profit)),
-            'count': pos['count'] + online['count'],
+            'count': sum(b['count'] for b in buckets),
         }
 
     return {'grain': 'month' if monthly else 'day', 'points': [point(p, b) for p, b in periods.items()]}
@@ -210,7 +259,8 @@ def previous_period(date_from, date_to):
 
 
 def sales_metrics(date_from=None, date_to=None):
-    """Ventas → Métricas: point-of-sale tickets plus paid online orders.
+    """Ventas → Métricas: point-of-sale tickets, paid online orders and presales
+    (on the day their record price got fully paid).
 
     Gross is what the records sold for (online excludes shipping, which is
     reported apart). Commission is the stored card commission for the point
@@ -230,12 +280,12 @@ def sales_metrics(date_from=None, date_to=None):
         sales = sales.filter(created_at__date__lte=date_to)
         orders = orders.filter(created_at__date__lte=date_to)
 
-    channels = {'pos': _bucket(), 'online': _bucket()}
+    channels = {'pos': _bucket(), 'online': _bucket(), 'presale': _bucket()}
     methods = defaultdict(_bucket)
     # Point-of-sale tickets by where they sold (store, bazar, other).
     places = defaultdict(_bucket)
     # Per store day and channel, for the timeline.
-    days = defaultdict(lambda: {'pos': _bucket(), 'online': _bucket()})
+    days = defaultdict(lambda: {'pos': _bucket(), 'online': _bucket(), 'presale': _bucket()})
     records = {}
     owners = {}
 
@@ -294,6 +344,22 @@ def sales_metrics(date_from=None, date_to=None):
                 item.quantity, line,
             )
             add_owner(item.owner, item, line, fee * line / order.amount)
+
+    for order in _paid_presales(date_from, date_to):
+        figures = presale_figures(order)
+        gross, commission = figures['gross'], figures['commission']
+        cost, uncosted = figures['cost'], figures['uncosted']
+        for bucket in (channels['presale'], days[timezone.localdate(order.paid_at)]['presale']):
+            _add(bucket, gross, commission, units=1, cost=cost, units_without_cost=uncosted)
+        for name, part in figures['split'].items():
+            share = part / gross if gross else ZERO
+            _add(methods[name], part, commission * share, count=int(name == figures['dominant']), units=0,
+                 cost=cost * share, units_without_cost=0)
+        shipping += figures['shipping']
+        presale = order.option.presale
+        add_record(f'presale:{order.option_id}', f'{presale.title} · {order.option.name}', presale.artist,
+                   None, 1, gross)
+        add_owner(figures['line'].owner, figures['line'], gross, commission)
 
     summary = _bucket()
     for bucket in channels.values():
@@ -392,5 +458,54 @@ def sales_csv_rows(date_from=None, date_to=None, owner_id=None):
                 record.artist.name if record and record.artist else '',
                 fee * item.price * item.quantity / order.amount if order.amount else ZERO,
             ))
+    for order in _paid_presales(date_from, date_to):
+        figures = presale_figures(order)
+        line = figures['line']
+        if owner_id and order.option.owner_id != owner_id:
+            continue
+        presale = order.option.presale
+        rows.append(row(
+            order.paid_at, 'Preventa', 'Preventa', order.code, figures['method_label'] or 'Sin registrar',
+            order.buyer_email or (order.user.email if order.user_id else ''), line,
+            f'{presale.title} · {order.option.name}', presale.artist, figures['commission'],
+        ))
     rows.sort(key=lambda r: r[0])
     return [values for _, values in rows]
+
+
+def notify_presale_owner(order):
+    """Consignor email when their presale copy is fully paid (once per order). Never raises."""
+    owner = order.option.owner
+    if owner is None or order.owner_notified:
+        return
+    presale = order.option.presale
+    try:
+        send_email(
+            template_name="owner_sale",
+            context={
+                "owner_name": owner.name,
+                "sale_id": order.code,
+                "sold_at": timezone.localtime(order.paid_at or timezone.now()).strftime("%d/%m/%Y %H:%M"),
+                "items": [{
+                    "title": f"{presale.title} · {order.option.name}",
+                    "artist": presale.artist,
+                    "image_url": None,
+                    "quantity": 1,
+                    "price_str": _money(order.item_price),
+                    "subtotal_str": _money(order.item_price),
+                }],
+                "payment_method": "Preventa",
+                "has_commission": False,
+                "commission_rate": "0.00",
+                "gross_str": _money(order.item_price),
+                "commission_str": _money(ZERO),
+                "total_str": _money(order.item_price),
+                "frontend_url": settings.FRONTEND_URL,
+            },
+            subject=f"Vendimos tu disco en preventa 🎶 — {order.code}",
+            to=[owner.email],
+        )
+    except Exception:
+        logger.exception("Presale %s: email to owner %s failed", order.code, owner.email)
+        return
+    PreSaleOrder.objects.filter(pk=order.pk).update(owner_notified=True)
