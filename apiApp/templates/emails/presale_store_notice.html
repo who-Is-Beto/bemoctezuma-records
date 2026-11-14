@@ -5,7 +5,7 @@
 {% block content %}
 <div>
     <div style="font-size:12px;letter-spacing:1px;color:#f4903c;text-transform:uppercase;margin-bottom:6px;">{{ title }}</div>
-    <div style="font-size:22px;font-weight:700;color:#0f3f67;margin:0 0 6px;">{{ presale.title }} · {{ option.name }}</div>
+    <div style="font-size:22px;font-weight:700;color:#0f3f67;margin:0 0 6px;">{{ presale.title }} · {{ lines_label }}</div>
     <div style="color:#4f5b67;font-size:15px;margin-bottom:14px;">{{ order.buyer_name }} · {{ order.buyer_email }} · {{ order.get_delivery_display }}</div>
     {% if oversold %}
     <div style="padding:12px 16px;border-radius:12px;background:#fdecea;color:#8a1c12;font-size:14px;margin-bottom:14px;">

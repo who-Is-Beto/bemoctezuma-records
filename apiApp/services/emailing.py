@@ -298,11 +298,15 @@ def _money_str(value):
 
 def _presale_email_context(order, kind):
     from . import presales as svc
-    option = order.option
-    presale = option.presale
+    items = list(order.items.select_related('option__presale'))
+    presale = items[0].option.presale
     balance = svc.balance(order)
     subject, headline, intro = PRESALE_EMAILS[kind]
-    if kind == 'arrived':
+    label = lambda lines: ', '.join(f'{i.option.name} ×{i.quantity}' for i in lines)  # noqa: E731
+    missing = [i for i in items if not i.option.arrived_at]
+    if kind == 'arrived' and missing:
+        intro = f"Llegó: {label(i for i in items if i.option.arrived_at)}. Falta: {label(missing)}."
+    elif kind == 'arrived':
         if balance > 0:
             intro = f"Liquida {_money_str(balance)} y es tuyo."
         elif order.delivery == 'shipping':
@@ -320,8 +324,12 @@ def _presale_email_context(order, kind):
         "code": order.code,
         "title": presale.title,
         "artist": presale.artist,
-        "option": option.name,
-        "cover_url": _image_url(option.image or presale.cover),
+        "lines": [
+            {"name": i.option.name, "quantity": i.quantity, "image_url": _image_url(i.option.image or presale.cover),
+             "arrived": i.option.arrived_at is not None, "delivered": i.delivered_at is not None}
+            for i in items
+        ],
+        "cover_url": _presale_cover(presale),
         "total": _money_str(total_due),
         "paid": _money_str(paid),
         "paid_percent": min(int(paid * 100 / total_due), 100) if total_due > 0 else 100,
@@ -329,7 +337,7 @@ def _presale_email_context(order, kind):
         "owes": balance > 0,
         "shipping_pending": svc.shipping_pending(order),
         "deadline": svc.deadline(order).strftime('%d/%m/%Y'),
-        "arrived": option.arrived_at is not None,
+        "arrived": not missing,
         "delivery_label": order.get_delivery_display(),
         "tracking": order.shipping_link,
         "orders_link": _frontend("/mis-ordenes"),
@@ -367,6 +375,7 @@ def send_presale_store_notice(order, kind):
         'oversold': "Sobreventa en preventa",
         'overpaid': "Pago de más en preventa",
     }.get(kind, "Nueva preventa apartada")
+    presale = order.items.select_related('option__presale').first().option.presale
     try:
         send_email(
             template_name="presale_store_notice",
@@ -375,13 +384,13 @@ def send_presale_store_notice(order, kind):
                 "oversold": kind == 'oversold',
                 "overpaid": kind == 'overpaid',
                 "order": order,
-                "presale": order.option.presale,
-                "option": order.option,
+                "presale": presale,
+                "lines_label": svc.lines_label(order),
                 "paid": _money_str(svc.paid_amount(order)),
                 "balance": _money_str(svc.balance(order)),
                 "admin_link": _frontend(f"/admin?tab=presales&code={order.code}"),
             },
-            subject=f"{title}: {order.option.presale.title} · {order.code}",
+            subject=f"{title}: {presale.title} · {order.code}",
             to=recipients,
         )
         return True

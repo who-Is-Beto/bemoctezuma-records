@@ -97,3 +97,34 @@ def test_reminders_skip_unarrived_and_paid():
     svc.record_payment(paid, D('800'), 'cash')
     call_command('presale_reminders')
     assert mail.outbox == []
+
+
+@pytest.mark.django_db
+def test_order_email_lists_lines():
+    red = make_option(name='Rojo')
+    black = make_option(red.presale, name='Negro', price=D('600'))
+    order = make_order(lines=[(red, 2), (black, 1)])
+    send_presale_email(order, 'reserved')
+    body = mail.outbox[-1].body
+    assert 'Rojo ×2' in body and 'Negro ×1' in body
+
+
+@pytest.mark.django_db
+def test_arrived_email_names_what_is_missing(user):
+    red = make_option(name='Rojo')
+    black = make_option(red.presale, name='Negro', price=D('600'))
+    order = make_order(lines=[(red, 2), (black, 1)])
+    svc.mark_arrived(red, by=user)
+    send_presale_email(order, 'arrived')
+    body = mail.outbox[-1].body
+    assert 'Llegó: Rojo ×2.' in body and 'Falta: Negro ×1.' in body
+
+
+@pytest.mark.django_db
+def test_reminders_wait_for_all_lines():
+    red = make_option(name='Rojo', arrived_at=timezone.now() - timedelta(days=20))
+    black = make_option(red.presale, name='Negro')
+    make_order(lines=[(red, 1), (black, 1)], reserved_at=timezone.now() - timedelta(days=150),
+               deadline_override=timezone.localdate() + timedelta(days=7))
+    call_command('presale_reminders')
+    assert mail.outbox == []

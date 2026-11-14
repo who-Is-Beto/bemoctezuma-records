@@ -1,7 +1,7 @@
 """Daily: remind buyers whose presale balance is due in 30 or 7 days.
 
 Run once a day (Railway cron service): `python manage.py presale_reminders`.
-Only for records that already arrived (the deadline can't pass before that).
+Only for orders whose every version arrived (the deadline can't pass before that).
 Never expires orders: the owner does that from Administración.
 """
 from django.core.management.base import BaseCommand
@@ -18,10 +18,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         sent = 0
-        orders = PreSaleOrder.objects.select_related('option__presale', 'user').filter(
-            status__in=('apartado', 'pagado'), option__arrived_at__isnull=False,
+        orders = PreSaleOrder.objects.select_related('user').prefetch_related('items__option').filter(
+            status__in=('apartado', 'pagado'),
         )
         for order in orders:
+            if svc.last_arrival(order) is None:  # some version is still on its way
+                continue
             days = svc.days_left(order)
             if days not in REMINDER_DAYS or days in (order.reminders_sent or []):
                 continue
