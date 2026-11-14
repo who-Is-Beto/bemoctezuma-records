@@ -177,6 +177,13 @@ def test_create_order_requires_terms(option, user):
     assert exc.value.code == 'terms_required'
 
 
+def test_online_order_without_a_saved_name_uses_the_username(option, user):
+    user.first_name = None
+    user.last_name = None
+    user.save()
+    assert _online(option, user).buyer_name == user.username
+
+
 def test_online_order_is_held(option, user):
     order = _online(option, user)
     assert order.status == 'pending_payment'

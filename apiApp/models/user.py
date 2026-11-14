@@ -25,3 +25,7 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.username
+
+    def get_full_name(self):
+        # Names are nullable here; Django's version would print "None None".
+        return " ".join(part for part in (self.first_name, self.last_name) if part).strip()
