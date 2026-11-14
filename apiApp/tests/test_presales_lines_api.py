@@ -104,3 +104,15 @@ def test_all_arrived_sends_one_email_per_order(admin_client, red, black):
     res = admin_client.post(f'/presales/admin/{red.presale_id}/arrived/', format='json')
     assert res.status_code == 200
     assert [m.to[0] for m in mail.outbox if order.code in m.subject] == ['ana@example.com']
+
+
+def test_settle_after_partial_pickup_charges_only_the_rest(client, user, red, black):
+    order = make_order(lines=[(red, 1), (black, 1)], user=user)  # 1400
+    svc.record_payment(order, D('800'), 'cash')
+    svc.mark_arrived(red, by=None)
+    svc.deliver(order, by=None, item_ids=[order.items.get(option=red).pk])
+    with mock.patch('stripe.checkout.Session.create', return_value=FAKE_SESSION) as create:
+        res = client.post(f'/presales/orders/{order.code}/settle/', format='json')
+    assert res.status_code == 200, res.json()
+    lines = create.call_args.kwargs['line_items']
+    assert [line['price_data']['unit_amount'] for line in lines] == [60000]
