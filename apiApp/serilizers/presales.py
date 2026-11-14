@@ -29,11 +29,12 @@ class PreSaleOptionPublicSerializer(serializers.ModelSerializer):
     format = serializers.SerializerMethodField()
     copies_left = serializers.SerializerMethodField()
     arrived = serializers.SerializerMethodField()
+    bought = serializers.SerializerMethodField()
 
     class Meta:
         model = PreSaleOption
         fields = ['id', 'name', 'image', 'format', 'price', 'min_deposit', 'full_payment_discount',
-                  'copies', 'copies_left', 'arrived', 'is_active']
+                  'copies', 'copies_left', 'arrived', 'is_active', 'max_per_buyer', 'bought']
 
     def get_image(self, obj):
         return media_url(obj.image, self.context.get('request'))
@@ -46,6 +47,11 @@ class PreSaleOptionPublicSerializer(serializers.ModelSerializer):
 
     def get_arrived(self, obj):
         return obj.arrived_at is not None
+
+    def get_bought(self, obj):
+        # How many the signed-in buyer already holds: the page caps the stepper at the limit.
+        user = getattr(self.context.get('request'), 'user', None)
+        return svc.held_by_user(obj, user) if user and user.is_authenticated else 0
 
 
 class PreSalePublicSerializer(serializers.ModelSerializer):
@@ -92,8 +98,8 @@ def presale_is_open(presale):
 
 def presale_order_payload(order, request=None):
     """What a customer sees about their own presale order."""
-    option = order.option
-    presale = option.presale
+    items = list(order.items.all())
+    presale = items[0].option.presale
     paid = svc.paid_amount(order)
     return {
         'code': order.code,
@@ -103,10 +109,25 @@ def presale_order_payload(order, request=None):
             'slug': presale.slug,
             'title': presale.title,
             'artist': presale.artist,
-            'cover': media_url(option.image or presale.cover, request),
+            'cover': media_url(presale.cover, request),
             'estimated_arrival': presale.estimated_arrival,
         },
-        'option': {'id': option.id, 'name': option.name},
+        'items': [
+            {
+                'id': item.id,
+                'option_id': item.option_id,
+                'option_name': item.option.name,
+                'image': media_url(item.option.image or presale.cover, request),
+                'quantity': item.quantity,
+                'unit_price': money(item.unit_price),
+                'unit_discount': money(item.unit_discount),
+                'line_total': money(item.line_total),
+                'arrived': item.option.arrived_at is not None,
+                'delivered_at': item.delivered_at.isoformat() if item.delivered_at else None,
+            }
+            for item in items
+        ],
+        'lines_label': svc.lines_label(order),
         'delivery': order.delivery,
         'delivery_label': order.get_delivery_display(),
         'item_price': money(order.item_price),
@@ -119,7 +140,7 @@ def presale_order_payload(order, request=None):
         'balance': money(svc.balance(order)),
         'deadline': svc.deadline(order).isoformat(),
         'days_left': svc.days_left(order),
-        'arrived': option.arrived_at is not None,
+        'all_arrived': svc.all_arrived(order),
         'payments': [
             {
                 'id': p.id,
@@ -146,8 +167,8 @@ class PreSaleOptionAdminSerializer(serializers.ModelSerializer):
     class Meta:
         model = PreSaleOption
         fields = ['id', 'name', 'image', 'image_url', 'category', 'weight_grams', 'price', 'min_deposit',
-                  'full_payment_discount', 'cost_price', 'owner', 'copies', 'is_active', 'position',
-                  'arrived_at', 'copies_left', 'taken', 'has_orders']
+                  'full_payment_discount', 'cost_price', 'owner', 'copies', 'max_per_buyer', 'is_active',
+                  'position', 'arrived_at', 'copies_left', 'taken', 'has_orders']
         read_only_fields = ['arrived_at']
         extra_kwargs = {'image': {'write_only': True, 'required': False}}
 
@@ -161,7 +182,7 @@ class PreSaleOptionAdminSerializer(serializers.ModelSerializer):
         return obj.copies - svc.copies_left(obj)
 
     def get_has_orders(self, obj):
-        return obj.orders.exists()
+        return obj.items.exists()
 
     def validate(self, attrs):
         instance = self.instance or PreSaleOption()
@@ -199,19 +220,21 @@ class PreSaleAdminSerializer(serializers.ModelSerializer):
 
 def presale_totals(presale):
     from ..models import PreSaleOrder
-    orders = PreSaleOrder.objects.filter(option__presale=presale).exclude(status='pending_payment')
+    orders = PreSaleOrder.objects.filter(items__option__presale=presale).exclude(status='pending_payment').distinct()
     reserved = paid_full = expired = 0
     collected = owed = svc.ZERO
-    for order in orders.prefetch_related('payments').select_related('option'):
+    # reserved / paid_full count copies (an order can hold several).
+    for order in orders.prefetch_related('payments', 'items__option'):
+        copies = sum(item.quantity for item in order.items.all())
         paid = svc.paid_amount(order)
         if order.status in ('cancelado', 'vencido'):
             expired += order.status == 'vencido'
             collected += paid if order.status == 'vencido' else svc.ZERO
             continue
-        reserved += 1
+        reserved += copies
         collected += paid
         owed += svc.balance(order)
-        paid_full += svc.balance(order) == 0 and not svc.shipping_pending(order)
+        paid_full += copies if svc.balance(order) == 0 and not svc.shipping_pending(order) else 0
     copies = sum(o.copies for o in presale.options.all())
     return {
         'copies': copies,
@@ -227,7 +250,7 @@ def presale_admin_order_payload(order, request=None):
     data = presale_order_payload(order, request)
     data.update({
         'id': order.id,
-        'presale_id': order.option.presale_id,
+        'presale_id': order.items.all()[0].option.presale_id,
         'buyer_name': order.buyer_name,
         'buyer_email': order.buyer_email or (order.user.email if order.user else ''),
         'buyer_phone': order.buyer_phone,

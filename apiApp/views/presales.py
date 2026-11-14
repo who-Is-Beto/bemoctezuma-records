@@ -28,6 +28,7 @@ from ..throttling import LiveScopedRateThrottle
 logger = logging.getLogger(__name__)
 
 ADDRESS_FIELDS = ['fullName', 'phone', 'street', 'number', 'neighborhood', 'city', 'state', 'zip']
+OPTIONAL_ADDRESS_FIELDS = ['reference']
 
 
 def _presales_qs():
@@ -67,12 +68,8 @@ def presale_detail(request, slug):
 @api_view(['POST'])
 @throttle_classes([LiveScopedRateThrottle])
 def presale_shipping_estimate(request):
-    option = PreSaleOption.objects.select_related('category').filter(pk=request.data.get('option_id')).first() \
-        if str(request.data.get('option_id', '')).isdigit() else None
-    if option is None:
-        return error_response("Elige una opción de la preventa.", status_code=400, code="invalid_option")
     try:
-        quote = svc.quote_shipping(option, request.data.get('zip'))
+        quote = svc.quote_shipping(svc.parse_items(request.data.get('items')), request.data.get('zip'))
     except svc.PresaleError as exc:
         return presale_error(exc)
     except ShippingQuoteError as exc:
@@ -96,9 +93,28 @@ def _line(name, amount):
             'quantity': 1}
 
 
+def _record_lines(order, presale, item_amount, item_label):
+    """Stripe lines for the records: one per version on a reservation (``item_amount``
+    spread by each line's share, cents rounded, the remainder on the last), one on a settle."""
+    if item_amount <= 0:
+        return []
+    items = list(order.items.all())
+    if item_label == 'liquidación' or len(items) == 1:
+        label = f"{items[0].option.name} ×{items[0].quantity}" if len(items) == 1 else svc.lines_label(order)
+        return [_line(f"{presale.title} — {label} ({item_label})", item_amount)]
+    total = sum((item.line_total for item in items), Decimal('0'))
+    lines, given = [], Decimal('0')
+    for index, item in enumerate(items):
+        share = item_amount - given if index == len(items) - 1 else \
+            (Decimal(item_amount) * item.line_total / total).quantize(svc.CENT)
+        given += share
+        lines.append(_line(f"{presale.title} — {item.option.name} ×{item.quantity} ({item_label})", share))
+    return lines
+
+
 def _checkout(order, *, purpose, item_amount, shipping_amount, item_label):
-    presale = order.option.presale
-    line_items = [_line(f"{presale.title} — {order.option.name} ({item_label})", item_amount)] if item_amount > 0 else []
+    presale = order.items.all()[0].option.presale
+    line_items = _record_lines(order, presale, item_amount, item_label)
     if shipping_amount > 0:
         line_items.append(_line("Envío", shipping_amount))
     frontend = settings.FRONTEND_URL.rstrip('/')
@@ -124,11 +140,10 @@ def presale_reserve(request):
     if blocked:
         return blocked
     data = request.data
-    option_id = str(data.get('option_id', ''))
-    option = PreSaleOption.objects.select_related('presale', 'category').filter(pk=option_id).first() \
-        if option_id.isdigit() else None
-    if option is None:
-        return error_response("Elige una opción de la preventa.", status_code=400, code="invalid_option")
+    try:
+        lines = svc.parse_items(data.get('items'))
+    except svc.PresaleError as exc:
+        return presale_error(exc)
     delivery = data.get('delivery')
     if delivery not in ('pickup', 'shipping'):
         return error_response("Elige cómo quieres recibir tu disco.", status_code=400, code="invalid_delivery")
@@ -144,9 +159,9 @@ def presale_reserve(request):
         missing = [k for k in ADDRESS_FIELDS if not str(details.get(k) or '').strip()]
         if missing:
             return error_response(f"Falta: {', '.join(missing)}", status_code=400, code="missing_shipping_fields")
-        details = {k: str(details[k]).strip()[:200] for k in ADDRESS_FIELDS}
+        details = {k: str(details.get(k) or '').strip()[:200] for k in ADDRESS_FIELDS + OPTIONAL_ADDRESS_FIELDS}
         try:
-            quote = svc.quote_shipping(option, details['zip'])
+            quote = svc.quote_shipping(lines, details['zip'])
         except svc.PresaleError as exc:
             return presale_error(exc)
         except ShippingQuoteError as exc:
@@ -155,11 +170,11 @@ def presale_reserve(request):
 
     try:
         order = svc.create_order(
-            option, buyer=request.user, source='online', delivery=delivery, shipping_details=details,
+            lines, buyer=request.user, source='online', delivery=delivery, shipping_details=details,
             amount=data.get('amount'), shipping_quote=quote['cost'] if quote else None, accept_terms=True,
         )
     except svc.PresaleError as exc:
-        return presale_error(exc, status_code=409 if exc.code == 'sold_out' else 400)
+        return presale_error(exc, status_code=409 if exc.code in ('sold_out', 'limit_exceeded') else 400)
     if quote:
         order.shipping_courier, order.shipping_service = quote['courier'], quote['service']
         order.save(update_fields=['shipping_courier', 'shipping_service'])
@@ -182,7 +197,7 @@ def presale_reserve(request):
 
 
 def _own_order(request, code):
-    return PreSaleOrder.objects.select_related('option__presale').filter(
+    return PreSaleOrder.objects.prefetch_related('items__option__presale').filter(
         code=code.upper(), user=request.user).exclude(status='pending_payment').first()
 
 
@@ -234,7 +249,7 @@ def presale_checkout_complete(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def presale_my_orders(request):
-    orders = PreSaleOrder.objects.select_related('option__presale').prefetch_related('payments').filter(
+    orders = PreSaleOrder.objects.prefetch_related('payments', 'items__option__presale').filter(
         user=request.user).exclude(status='pending_payment')
     return Response([presale_order_payload(o, request) for o in orders])
 

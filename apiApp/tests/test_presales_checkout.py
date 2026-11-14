@@ -26,7 +26,8 @@ def client(api_client, user):
 
 
 def reserve(client, option, **extra):
-    data = {'option_id': option.id, 'amount': '400', 'delivery': 'pickup', 'accept_terms': True}
+    data = {'items': [{'option_id': option.id, 'quantity': 1}], 'amount': '400', 'delivery': 'pickup',
+            'accept_terms': True}
     data.update(extra)
     with mock.patch('stripe.checkout.Session.create', return_value=FAKE_SESSION) as create:
         res = client.post('/presales/reserve/', data, format='json')

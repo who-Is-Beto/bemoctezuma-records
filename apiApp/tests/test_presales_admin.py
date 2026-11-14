@@ -105,7 +105,7 @@ def test_create_requires_an_option(admin_client):
 def test_admin_registers_instagram_order_with_cash(admin_client):
     option = make_option()
     res = admin_client.post('/presales/admin/orders/', {
-        'option_id': option.id, 'buyer_name': 'Luis', 'buyer_phone': '5511112222', 'source': 'instagram',
+        'items': [{'option_id': option.id, 'quantity': 1}], 'buyer_name': 'Luis', 'buyer_phone': '5511112222', 'source': 'instagram',
         'delivery': 'pickup', 'amount': '300', 'method': 'cash', 'terms_accepted': True,
     }, format='json')
     assert res.status_code == 201, res.json()
@@ -118,7 +118,7 @@ def test_admin_registers_instagram_order_with_cash(admin_client):
 def test_admin_order_requires_terms(admin_client):
     option = make_option()
     res = admin_client.post('/presales/admin/orders/', {
-        'option_id': option.id, 'buyer_name': 'Luis', 'source': 'store', 'delivery': 'pickup',
+        'items': [{'option_id': option.id, 'quantity': 1}], 'buyer_name': 'Luis', 'source': 'store', 'delivery': 'pickup',
         'amount': '300', 'method': 'cash', 'terms_accepted': False}, format='json')
     assert res.status_code == 400
 
@@ -128,7 +128,7 @@ def test_admin_order_links_verified_user_by_email(admin_client):
     customer = User.objects.create_user(username='ana', email='ana@example.com', password='x', email_verified=True)
     option = make_option()
     admin_client.post('/presales/admin/orders/', {
-        'option_id': option.id, 'buyer_name': 'Ana', 'buyer_email': 'ANA@example.com', 'source': 'store',
+        'items': [{'option_id': option.id, 'quantity': 1}], 'buyer_name': 'Ana', 'buyer_email': 'ANA@example.com', 'source': 'store',
         'delivery': 'pickup', 'amount': '300', 'method': 'card', 'terms_accepted': True}, format='json')
     assert PreSaleOrder.objects.get().user == customer
 
@@ -219,7 +219,7 @@ def test_payment_void_and_deliver_flow(admin_client):
     res = admin_client.post(f'/presales/admin/payments/{payment_id}/void/', {'reason': 'No llegó'}, format='json')
     assert res.json()['status'] == 'apartado'
     res = admin_client.post(f'/presales/admin/orders/{order.id}/deliver/', format='json')
-    assert res.status_code == 400 and res.json()['error']['code'] == 'balance_due'
+    assert res.status_code == 400 and res.json()['error']['code'] == 'paid_not_enough'
 
 
 @pytest.mark.django_db

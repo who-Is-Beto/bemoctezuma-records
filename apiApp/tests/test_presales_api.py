@@ -46,7 +46,7 @@ def test_list_item_shape(api_client):
 @pytest.mark.django_db
 def test_copies_left_counts_holds(api_client, user):
     option = make_option(copies=2)
-    svc.create_order(option, buyer=user, source='online', delivery='pickup', shipping_details=None,
+    svc.create_order([(option, 1)], buyer=user, source='online', delivery='pickup', shipping_details=None,
                      amount=Decimal('200'), accept_terms=True)
     item = api_client.get(f'/presales/{option.presale.slug}/').json()
     assert item['options'][0]['copies_left'] == 1
@@ -79,7 +79,7 @@ def test_shipping_estimate_uses_option_weight(api_client):
     cd = Category.objects.create(name='CD')
     option = make_option(category=cd)
     with mock.patch('apiApp.services.shipping.get_shipping_quotes', return_value=QUOTE) as quotes:
-        res = api_client.post('/presales/shipping-estimate/', {'option_id': option.id, 'zip': '64000'}, format='json')
+        res = api_client.post('/presales/shipping-estimate/', {'items': [{'option_id': option.id, 'quantity': 1}], 'zip': '64000'}, format='json')
     assert res.status_code == 200
     assert res.json()['shipping_estimate'] == '150.00'
     zip_code, package = quotes.call_args.args
@@ -90,5 +90,5 @@ def test_shipping_estimate_uses_option_weight(api_client):
 @pytest.mark.django_db
 def test_shipping_estimate_rejects_bad_zip(api_client):
     option = make_option()
-    res = api_client.post('/presales/shipping-estimate/', {'option_id': option.id, 'zip': 'abc'}, format='json')
+    res = api_client.post('/presales/shipping-estimate/', {'items': [{'option_id': option.id, 'quantity': 1}], 'zip': 'abc'}, format='json')
     assert res.status_code == 400

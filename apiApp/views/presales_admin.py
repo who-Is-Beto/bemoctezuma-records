@@ -37,8 +37,9 @@ LOCKED_OPTION_FIELDS = ('price', 'min_deposit', 'full_payment_discount')
 
 def _orders_qs():
     return PreSaleOrder.objects.select_related(
-        'option__presale', 'user', 'delivered_by'
+        'user', 'delivered_by'
     ).prefetch_related(
+        'items__option__presale',
         Prefetch('payments', queryset=PreSalePayment.objects.select_related('registered_by', 'voided_by')),
         Prefetch('events', queryset=PreSaleOrderEvent.objects.select_related('actor')),
     )
@@ -121,7 +122,7 @@ def admin_presale_detail(request, presale_id):
     if request.method == 'GET':
         return Response(PreSaleAdminSerializer(presale, context={'request': request}).data)
     if request.method == 'DELETE':
-        if PreSaleOrder.objects.filter(option__presale=presale).exists():
+        if PreSaleOrder.objects.filter(items__option__presale=presale).exists():
             return error_response("Esta preventa ya tiene compradores; ciérrala en lugar de borrarla.",
                                   status_code=400, code="presale_has_orders")
         presale.delete()
@@ -170,7 +171,7 @@ def admin_presale_option(request, option_id):
     option = PreSaleOption.objects.filter(pk=option_id).first()
     if option is None:
         return _not_found()
-    has_orders = option.orders.exists()
+    has_orders = option.items.exists()
     if request.method == 'DELETE':
         if has_orders:
             return error_response("Esta opción ya tiene compradores; ocúltala en lugar de borrarla.",
@@ -218,16 +219,16 @@ def admin_presale_publish(request, presale_id):
 
 def _arrive(request, options):
     from ..services.emailing import send_presale_email
-    for option in options:
-        orders = svc.mark_arrived(option, by=request.user)
-        for order in orders:
-            order.refresh_from_db()
-            if order.delivery == 'shipping' and order.shipping_cost is None:
-                try:
-                    svc.requote_shipping(order, by=request.user)
-                except (svc.PresaleError, ShippingQuoteError) as exc:
-                    logger.warning("Could not re-quote shipping for %s: %s", order.code, exc)
-            send_presale_email(order, 'arrived')
+    # An order with several versions arriving together gets one email.
+    orders = {order.pk: order for option in options for order in svc.mark_arrived(option, by=request.user)}
+    for order in orders.values():
+        order.refresh_from_db()
+        if order.delivery == 'shipping' and order.shipping_cost is None and svc.all_arrived(order):
+            try:
+                svc.requote_shipping(order, by=request.user)
+            except (svc.PresaleError, ShippingQuoteError) as exc:
+                logger.warning("Could not re-quote shipping for %s: %s", order.code, exc)
+        send_presale_email(order, 'arrived')
 
 
 @api_view(['POST'])
@@ -266,7 +267,8 @@ def admin_presale_extend(request, presale_id):
         until = date.fromisoformat(str(request.data.get('until')))
     except ValueError:
         return error_response("Elige una fecha válida.", status_code=400, code="invalid_date")
-    orders = PreSaleOrder.objects.filter(option__presale_id=presale_id, status__in=('apartado', 'pagado', 'listo'))
+    orders = PreSaleOrder.objects.filter(items__option__presale_id=presale_id,
+                                         status__in=('apartado', 'pagado', 'listo')).distinct()
     # Extending never shortens: an order that already has a later date keeps it.
     orders = [o for o in orders if o.deadline_override is None or o.deadline_override < until]
     for order in orders:
@@ -282,9 +284,9 @@ def admin_presale_extend(request, presale_id):
 ORDER_FILTERS = {
     'owes': lambda o: o.status in ('apartado', 'pagado') and (svc.balance(o) > 0 or svc.shipping_pending(o)),
     'ready': lambda o: o.status == 'listo' or (o.status == 'pagado' and o.delivery == 'shipping'
-                                               and o.option.arrived_at and svc.balance(o) == 0
+                                               and svc.all_arrived(o) and svc.balance(o) == 0
                                                and not svc.shipping_pending(o)),
-    'expiring': lambda o: o.status in ('apartado', 'pagado') and o.option.arrived_at and svc.balance(o) > 0
+    'expiring': lambda o: o.status in ('apartado', 'pagado') and svc.all_arrived(o) and svc.balance(o) > 0
     and 0 <= svc.days_left(o) <= 7,
     'expired': lambda o: o.status == 'vencido' or svc.is_expirable(o),
 }
@@ -299,7 +301,7 @@ def admin_presale_orders(request, presale_id):
     presale = PreSale.objects.filter(pk=presale_id).first()
     if presale is None:
         return _not_found()
-    orders = list(_orders_qs().filter(option__presale=presale).exclude(status='pending_payment'))
+    orders = list(_orders_qs().filter(items__option__presale=presale).exclude(status='pending_payment').distinct())
     matches = ORDER_FILTERS.get(request.query_params.get('filter'))
     if matches:
         orders = [o for o in orders if matches(o)]
@@ -316,10 +318,10 @@ def admin_presale_create_order(request):
     if denied:
         return denied
     data = request.data
-    option_id = str(data.get('option_id', ''))
-    option = PreSaleOption.objects.select_related('presale').filter(pk=option_id).first() if option_id.isdigit() else None
-    if option is None:
-        return error_response("Elige una opción.", status_code=400, code="invalid_option")
+    try:
+        lines = svc.parse_items(data.get('items'))
+    except svc.PresaleError as exc:
+        return presale_error(exc)
     name = str(data.get('buyer_name') or '').strip()
     if not name:
         return error_response("Escribe el nombre del cliente.", status_code=400, code="buyer_name_required")
@@ -334,11 +336,11 @@ def admin_presale_create_order(request):
     try:
         if delivery == 'shipping' and details and details.get('zip'):
             try:
-                quote = svc.quote_shipping(option, details.get('zip'))['cost']
+                quote = svc.quote_shipping(lines, details.get('zip'))['cost']
             except ShippingQuoteError:
                 quote = None
         order = svc.create_order(
-            option,
+            lines,
             buyer={'name': name, 'email': email, 'phone': str(data.get('buyer_phone') or '').strip()},
             source=source, delivery=delivery, shipping_details=details, amount=data.get('amount'),
             method=method, shipping_quote=quote, created_by=request.user,
@@ -484,9 +486,13 @@ def _order_action(action):
 
 
 def _deliver(request, order):
-    svc.deliver(order, by=request.user)
-    from ..services.emailing import send_presale_email
-    send_presale_email(order, 'delivered')
+    item_ids = request.data.get('item_ids')
+    if item_ids is not None and (not isinstance(item_ids, list) or not all(str(i).isdigit() for i in item_ids)):
+        raise svc.PresaleError('invalid_items')
+    svc.deliver(order, by=request.user, item_ids=item_ids)
+    if order.status == 'entregado':
+        from ..services.emailing import send_presale_email
+        send_presale_email(order, 'delivered')
 
 
 def _ship(request, order):
