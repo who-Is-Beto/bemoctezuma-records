@@ -1,7 +1,7 @@
 """Preventas: upcoming records sold ahead with a deposit (apartado) or paid in full.
 
-A PreSale has one or more options (colors, formats, editions); each PreSaleOrder
-is one copy of one option. Money paid is never stored on the order: it is the sum
+A PreSale has one or more options (colors, formats, editions); a PreSaleOrder
+holds lines (PreSaleOrderItem: an option × quantity) under one code and balance. Money paid is never stored on the order: it is the sum
 of its PreSalePayment rows (the ledger), so voiding a payment is the only fix.
 Rules live in services/presales.py.
 """
@@ -81,6 +81,8 @@ class PreSaleOption(models.Model):
     owner = models.ForeignKey(Owner, on_delete=models.PROTECT, null=True, blank=True,
                               related_name='presale_options')
     copies = models.PositiveIntegerField()
+    # Most copies of this version one buyer can hold online; empty = no limit.
+    max_per_buyer = models.PositiveIntegerField(null=True, blank=True)
     # Hidden from new reservations (an option with orders is never deleted).
     is_active = models.BooleanField(default=True)
     position = models.PositiveIntegerField(default=0)
@@ -105,7 +107,7 @@ class PreSaleOption(models.Model):
 
 
 class PreSaleOrder(models.Model):
-    """One copy of one option, for one buyer."""
+    """One buyer's reservation: one or more lines, one code, one payment ledger."""
     SOURCES = (
         ('online', 'Sitio'),
         ('instagram', 'Instagram'),
@@ -126,7 +128,6 @@ class PreSaleOrder(models.Model):
         ('pickup', 'Recoger en tienda'),
         ('shipping', 'Envío a domicilio'),
     )
-    option = models.ForeignKey(PreSaleOption, on_delete=models.PROTECT, related_name='orders')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
                              related_name='presale_orders')
     buyer_name = models.CharField(max_length=120)
@@ -146,7 +147,7 @@ class PreSaleOrder(models.Model):
     shipping_service = models.CharField(max_length=50, blank=True, default='')
     shipping_link = models.CharField(max_length=255, blank=True, default='')
 
-    # Snapshot: option price, minus the discount when paid in full at reservation.
+    # Snapshot: sum of the lines, minus their discounts when paid in full at reservation.
     item_price = models.DecimalField(max_digits=10, decimal_places=2)
     discount_applied = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
@@ -185,6 +186,30 @@ class PreSaleOrder(models.Model):
                 code = generate_presale_code()
             self.code = code
         super().save(*args, **kwargs)
+
+
+class PreSaleOrderItem(models.Model):
+    """One version in an order: how many copies and the price they were reserved at."""
+    order = models.ForeignKey(PreSaleOrder, on_delete=models.CASCADE, related_name='items')
+    option = models.ForeignKey(PreSaleOption, on_delete=models.PROTECT, related_name='items')
+    quantity = models.PositiveIntegerField(default=1)
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    # Full-payment discount per copy (0 unless paid in full at reservation).
+    unit_discount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    # Pickup can hand over the lines that arrived before the rest.
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    delivered_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                                     related_name='presale_items_delivered')
+
+    class Meta:
+        ordering = ('id',)
+
+    def __str__(self):
+        return f"{self.option.name} ×{self.quantity}"
+
+    @property
+    def line_total(self):
+        return (self.unit_price - self.unit_discount) * self.quantity
 
 
 class PreSalePayment(models.Model):

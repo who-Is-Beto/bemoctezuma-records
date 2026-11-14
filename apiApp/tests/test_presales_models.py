@@ -31,7 +31,7 @@ def test_presale_slug_is_unique():
 def test_order_code_format():
     option = make_option(make_presale())
     order = PreSaleOrder.objects.create(
-        option=option, buyer_name='Ana', item_price=Decimal('800'), reserved_at=timezone.now()
+        buyer_name='Ana', item_price=Decimal('800'), reserved_at=timezone.now()
     )
     assert re.fullmatch(r'PV-[A-HJ-NP-Z2-9]{4}', order.code)
 
@@ -56,3 +56,14 @@ def test_option_clean_rejects_discount_ge_price():
 def test_subscriber_email_is_lowercased():
     sub = PreSaleSubscriber.objects.create(email='Ana@Example.COM')
     assert sub.email == 'ana@example.com'
+
+
+@pytest.mark.django_db
+def test_order_lines_total_and_copies():
+    from apiApp.tests import presale_factories as f
+    red = f.make_option(copies=10)
+    black = f.make_option(red.presale, name='Negro', price=Decimal('600'))
+    order = f.make_order(lines=[(red, 2), (black, 3)])
+    assert order.item_price == Decimal('3400')
+    assert [i.quantity for i in order.items.order_by('id')] == [2, 3]
+    assert order.items.order_by('id').first().line_total == Decimal('1600')

@@ -25,7 +25,7 @@ def paid(order, amount, session_id, purpose='reserve', shipping='0'):
 def test_last_copy_paid_within_hold_is_not_oversold(settings, user):
     settings.SELLER_NOTIFY_EMAILS = ['store@x.com']
     option = make_option(copies=1)
-    order = svc.create_order(option, buyer=user, source='online', delivery='pickup', shipping_details=None,
+    order = svc.create_order([(option, 1)], buyer=user, source='online', delivery='pickup', shipping_details=None,
                              amount=D('200'), accept_terms=True)
     svc.fulfil_presale_session(paid(order, '200', 'cs_last'))
     order.refresh_from_db()
@@ -40,7 +40,7 @@ def test_stripe_session_expires_with_the_hold(api_client, user):
     api_client.force_authenticate(user)
     option = make_option()
     with mock.patch('stripe.checkout.Session.create', return_value={'id': 'cs', 'url': 'u'}) as create:
-        api_client.post('/presales/reserve/', {'option_id': option.id, 'amount': '200', 'delivery': 'pickup',
+        api_client.post('/presales/reserve/', {'items': [{'option_id': option.id, 'quantity': 1}], 'amount': '200', 'delivery': 'pickup',
                                                'accept_terms': True}, format='json')
     expires = create.call_args.kwargs['expires_at']
     order = PreSaleOrder.objects.get()

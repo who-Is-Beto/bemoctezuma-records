@@ -34,7 +34,7 @@ admin.site.register([Cart, CartItem, Review, RecordRatingSummary, Order, OrderIt
 admin.site.register([Owner, Sale, SaleItem])
 
 
-from .models import PreSale, PreSaleOption, PreSaleOrder, PreSalePayment, PreSaleSubscriber
+from .models import PreSale, PreSaleOption, PreSaleOrder, PreSaleOrderItem, PreSalePayment, PreSaleSubscriber
 
 
 class PreSaleOptionInline(admin.TabularInline):
@@ -53,9 +53,14 @@ class PreSalePaymentInline(admin.TabularInline):
     extra = 0
 
 
+class PreSaleOrderItemInline(admin.TabularInline):
+    model = PreSaleOrderItem
+    extra = 0
+
+
 class PreSaleOrderAdmin(admin.ModelAdmin):
-    list_display = ('code', 'buyer_name', 'option', 'status', 'reserved_at')
+    list_display = ('code', 'buyer_name', 'status', 'reserved_at')
     search_fields = ('code', 'buyer_name', 'buyer_email')
-    inlines = [PreSalePaymentInline]
+    inlines = [PreSaleOrderItemInline, PreSalePaymentInline]
 admin.site.register(PreSaleOrder, PreSaleOrderAdmin)
 admin.site.register(PreSaleSubscriber)

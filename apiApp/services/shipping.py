@@ -80,15 +80,16 @@ def option_unit_weight_grams(option):
     return DEFAULT_UNIT_WEIGHT_GRAMS
 
 
-def build_package_for_option(option):
-    """Envíos Perros `package` for one copy of a presale option."""
+def build_package_for_items(lines):
+    """Envíos Perros `package` for presale ``lines`` [(option, qty)] shipped in one box."""
+    units = sum(qty for _, qty in lines)
+    grams = PACKAGE_TARE_GRAMS + sum(option_unit_weight_grams(option) * qty for option, qty in lines)
     return {
         'type': 'Box',
         'depth': BOX_DEPTH_CM,
         'width': BOX_WIDTH_CM,
-        'height': BOX_HEIGHT_PER_UNIT_CM,
-        'weight': max(round((PACKAGE_TARE_GRAMS + option_unit_weight_grams(option)) / 1000, 2),
-                      MIN_PACKAGE_WEIGHT_KG),
+        'height': min(BOX_HEIGHT_PER_UNIT_CM * max(units, 1), BOX_MAX_HEIGHT_CM),
+        'weight': max(round(grams / 1000, 2), MIN_PACKAGE_WEIGHT_KG),
     }
 
 

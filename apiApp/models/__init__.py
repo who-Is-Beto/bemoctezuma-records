@@ -16,6 +16,7 @@ from .presales import (
     PreSaleOption,
     PreSaleOrder,
     PreSaleOrderEvent,
+    PreSaleOrderItem,
     PreSalePayment,
     PreSaleSubscriber,
 )
@@ -37,6 +38,7 @@ __all__ = [
     'PreSaleOption',
     'PreSaleOrder',
     'PreSaleOrderEvent',
+    'PreSaleOrderItem',
     'PreSalePayment',
     'PreSaleSubscriber',
     'Record',

@@ -19,44 +19,44 @@ def option(db):
 # ── split_amount ───────────────────────────────────────────────────────────
 
 def test_split_deposit(option):
-    assert svc.split_amount(option, D('400'), 'pickup', None) == {
-        'item_price': D('800'), 'discount': D('0'), 'shipping_cost': None, 'charge': D('400'),
+    assert svc.split_amount([(option, 1)], D('400'), 'pickup', None) == {
+        'item_price': D('800'), 'discount': D('0'), 'shipping_cost': None, 'charge': D('400'), 'full': False,
     }
 
 
 def test_split_full_gets_discount_and_shipping(option):
-    assert svc.split_amount(option, D('750'), 'shipping', D('150')) == {
-        'item_price': D('750'), 'discount': D('50'), 'shipping_cost': D('150'), 'charge': D('900'),
+    assert svc.split_amount([(option, 1)], D('750'), 'shipping', D('150')) == {
+        'item_price': D('750'), 'discount': D('50'), 'shipping_cost': D('150'), 'charge': D('900'), 'full': True,
     }
 
 
 def test_split_between_discounted_and_price_is_full(option):
-    result = svc.split_amount(option, D('780'), 'pickup', None)
+    result = svc.split_amount([(option, 1)], D('780'), 'pickup', None)
     assert result['charge'] == D('750')
     assert result['discount'] == D('50')
 
 
 def test_split_rejects_below_minimum(option):
     with pytest.raises(PresaleError) as exc:
-        svc.split_amount(option, D('199.99'), 'pickup', None)
+        svc.split_amount([(option, 1)], D('199.99'), 'pickup', None)
     assert exc.value.code == 'amount_too_low'
 
 
 def test_split_rejects_three_decimals(option):
     with pytest.raises(PresaleError) as exc:
-        svc.split_amount(option, D('300.001'), 'pickup', None)
+        svc.split_amount([(option, 1)], D('300.001'), 'pickup', None)
     assert exc.value.code == 'invalid_amount'
 
 
 def test_split_above_price_rejected(option):
     with pytest.raises(PresaleError) as exc:
-        svc.split_amount(option, D('800.01'), 'pickup', None)
+        svc.split_amount([(option, 1)], D('800.01'), 'pickup', None)
     assert exc.value.code == 'invalid_amount'
 
 
 def test_split_full_shipping_requires_quote(option):
     with pytest.raises(PresaleError) as exc:
-        svc.split_amount(option, D('750'), 'shipping', None)
+        svc.split_amount([(option, 1)], D('750'), 'shipping', None)
     assert exc.value.code == 'shipping_quote_required'
 
 
@@ -166,13 +166,13 @@ def test_stripe_payment_is_idempotent(option):
 # ── create_order & copies ──────────────────────────────────────────────────
 
 def _online(option, user):
-    return svc.create_order(option, buyer=user, source='online', delivery='pickup',
+    return svc.create_order([(option, 1)], buyer=user, source='online', delivery='pickup',
                             shipping_details=None, amount=D('200'), accept_terms=True)
 
 
 def test_create_order_requires_terms(option, user):
     with pytest.raises(PresaleError) as exc:
-        svc.create_order(option, buyer=user, source='online', delivery='pickup',
+        svc.create_order([(option, 1)], buyer=user, source='online', delivery='pickup',
                          shipping_details=None, amount=D('200'), accept_terms=False)
     assert exc.value.code == 'terms_required'
 
@@ -224,7 +224,7 @@ def test_create_order_rejects_inactive_option(user):
 
 
 def test_admin_order_records_payment(option, user):
-    order = svc.create_order(option, buyer={'name': 'Luis', 'email': '', 'phone': '5512345678'},
+    order = svc.create_order([(option, 1)], buyer={'name': 'Luis', 'email': '', 'phone': '5512345678'},
                              source='instagram', delivery='pickup', shipping_details=None,
                              amount=D('750'), method='cash', created_by=user, accept_terms=True)
     assert order.status == 'pagado'
@@ -245,9 +245,10 @@ def test_mark_arrived_moves_paid_pickups_to_listo(option, user):
 def test_deliver_requires_zero_balance(option, user):
     order = make_order(option)
     svc.record_payment(order, D('200'), 'cash')
+    svc.mark_arrived(option, by=user)
     with pytest.raises(PresaleError) as exc:
         svc.deliver(order, by=user)
-    assert exc.value.code == 'balance_due'
+    assert exc.value.code == 'paid_not_enough'
 
 
 def test_deliver_twice_fails(option, user):
