@@ -85,7 +85,7 @@ def admin_presales(request):
     options = _parse_options(request.data.get('options'))
     if not options:
         return error_response("Agrega al menos una opción.", status_code=400, code="options_required")
-    data = {k: v for k, v in request.data.items() if k != 'options'}
+    data = {k: v for k, v in request.data.items() if k != 'options' and not k.startswith('option_image_')}
     serializer = PreSaleAdminSerializer(data=data, context={'request': request})
     if not serializer.is_valid():
         return error_response("Revisa los datos de la preventa.", status_code=400, code="invalid_presale",
@@ -94,7 +94,9 @@ def admin_presales(request):
     for position, option in enumerate(options):
         if not isinstance(option, dict):
             return error_response("Opción inválida.", status_code=400, code="invalid_option")
-        option_serializer = PreSaleOptionAdminSerializer(data={'position': position, **option},
+        image = request.FILES.get(f'option_image_{position}')  # optional photo of this version
+        option_data = {'position': position, **option, **({'image': image} if image else {})}
+        option_serializer = PreSaleOptionAdminSerializer(data=option_data,
                                                          context={'request': request})
         if not option_serializer.is_valid():
             return error_response(f"Revisa la opción {position + 1}.", status_code=400, code="invalid_option",

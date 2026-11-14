@@ -258,3 +258,34 @@ def test_extend_never_shortens_a_later_override(admin_client):
                       {'until': (timezone.localdate() + timedelta(days=200)).isoformat()}, format='json')
     order.refresh_from_db()
     assert order.deadline_override == later
+
+
+@pytest.mark.django_db
+def test_create_attaches_an_image_to_each_version(admin_client, settings, tmp_path):
+    settings.MEDIA_ROOT = tmp_path
+    options = [
+        {'name': 'Negro', 'price': '800', 'min_deposit': '200', 'copies': 10},
+        {'name': 'Rojo', 'price': '900', 'min_deposit': '200', 'copies': 5},
+    ]
+    res = admin_client.post('/presales/admin/', {
+        'title': 'Kind of Blue', 'artist': 'Miles Davis',
+        'purchase_deadline': (timezone.localdate() + timedelta(days=20)).isoformat(),
+        'options': json.dumps(options),
+        'option_image_1': image_file(),
+    }, format='multipart')
+    assert res.status_code == 201, res.json()
+    negro, rojo = PreSale.objects.get().options.order_by('position')
+    assert not negro.image
+    assert rojo.image.name.startswith('presales/')
+    assert res.json()['options'][1]['image_url']
+
+
+@pytest.mark.django_db
+def test_version_image_can_change_after_orders(admin_client, settings, tmp_path):
+    settings.MEDIA_ROOT = tmp_path
+    option = make_option()
+    make_order(option)
+    res = admin_client.patch(f'/presales/admin/options/{option.id}/', {'image': image_file()}, format='multipart')
+    assert res.status_code == 200, res.json()
+    option.refresh_from_db()
+    assert option.image
