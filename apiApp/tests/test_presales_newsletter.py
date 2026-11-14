@@ -1,3 +1,4 @@
+from decimal import Decimal
 from unittest import mock
 
 import pytest
@@ -82,6 +83,19 @@ def test_confirm_then_announce_sends_once():
     assert f'/preventas/{presale.slug}' in message.body
     assert '/preventas/baja?token=' in message.body
     assert 'List-Unsubscribe' in message.extra_headers
+
+
+@pytest.mark.django_db
+def test_announcement_lists_every_version_with_copies_left():
+    PreSaleSubscriber.objects.create(email='ana@example.com', confirmed_at=timezone.now())
+    presale = make_presale()
+    make_option(presale, name='Vinilo rojo', copies=10)
+    make_option(presale, name='Vinilo negro', price=Decimal('650'), copies=0)
+    with mock.patch('apiApp.services.emailing.threading.Thread', SyncThread):
+        announce_presale(presale)
+    body = mail.outbox[0].body
+    assert 'Vinilo rojo' in body and 'Quedan 10' in body
+    assert 'Vinilo negro' in body and 'Agotado' in body
 
 
 @pytest.mark.django_db

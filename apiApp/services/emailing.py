@@ -189,27 +189,39 @@ def presale_recipient_count():
     return _subscribers().count()
 
 
-def _presale_cover(presale):
-    if not presale.cover:
+def _image_url(image):
+    """Absolute URL of an uploaded image, or None (mail clients need http(s))."""
+    if not image:
         return None
     try:
-        url = presale.cover.url
+        url = image.url
     except ValueError:
         return None
     return url if url.startswith(('http://', 'https://')) else None
 
 
+def _presale_cover(presale):
+    return _image_url(presale.cover)
+
+
 def _send_announcements(presale_id, emails):
     from ..models import PreSale
+    from .presales import copies_left
     presale = PreSale.objects.prefetch_related('options').get(pk=presale_id)
     options = [o for o in presale.options.all() if o.is_active]
+    cover_url = _presale_cover(presale)
+    max_discount = max((o.full_payment_discount for o in options), default=0)
     context = {
         "presale": presale,
         "options": options,
-        "price_from": min((o.price for o in options), default=None),
-        "max_discount": max((o.full_payment_discount for o in options), default=0),
-        "min_deposit": min((o.min_deposit for o in options), default=None),
-        "cover_url": _presale_cover(presale),
+        "versions": [
+            {"name": o.name, "price": _money_str(o.price), "left": copies_left(o), "image_url": _image_url(o.image) or cover_url}
+            for o in options
+        ],
+        "price_from": _money_str(min((o.price for o in options), default=0)),
+        "max_discount": max_discount and _money_str(max_discount),
+        "min_deposit": _money_str(min((o.min_deposit for o in options), default=0)),
+        "cover_url": cover_url,
         "presale_link": _frontend(f"/preventas/{presale.slug}"),
     }
     sent = 0
@@ -299,11 +311,8 @@ def _presale_email_context(order, kind):
             intro = "Ya está pagado: pasa por él a la tienda con tu código."
     if kind == 'reminder':
         intro = f"Te faltan {_money_str(balance)}. Tienes hasta el {svc.deadline(order).strftime('%d/%m/%Y')} para liquidar o pierdes tu apartado."
-    cover = option.image or presale.cover
-    try:
-        cover_url = cover.url if cover else None
-    except ValueError:
-        cover_url = None
+    total_due = svc.total_due(order)
+    paid = svc.paid_amount(order)
     return {
         "subject": f"{subject} · {order.code}",
         "headline": headline,
@@ -312,9 +321,10 @@ def _presale_email_context(order, kind):
         "title": presale.title,
         "artist": presale.artist,
         "option": option.name,
-        "cover_url": cover_url if cover_url and cover_url.startswith(('http://', 'https://')) else None,
-        "total": _money_str(svc.total_due(order)),
-        "paid": _money_str(svc.paid_amount(order)),
+        "cover_url": _image_url(option.image or presale.cover),
+        "total": _money_str(total_due),
+        "paid": _money_str(paid),
+        "paid_percent": min(int(paid * 100 / total_due), 100) if total_due > 0 else 100,
         "balance": _money_str(balance),
         "owes": balance > 0,
         "shipping_pending": svc.shipping_pending(order),

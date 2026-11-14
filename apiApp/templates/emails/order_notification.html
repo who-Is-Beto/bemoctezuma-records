@@ -4,20 +4,20 @@
 
 {% block content %}
 <div>
-    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Orden #{{ order_id }}</div>
-    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">¡Nueva compra!</div>
+    <div style="font-size:12px;letter-spacing:1px;color:#f4903c;text-transform:uppercase;margin-bottom:6px;">Orden #{{ order_id }}</div>
+    <div style="font-size:24px;font-weight:700;color:#0f3f67;margin:0 0 12px;">¡Nueva compra!</div>
     <div style="color:#4f5b67;font-size:14px;margin-bottom:12px;">
         Un cliente realizó un pedido y ya fue pagado. Prepáralo en el mundo real.
     </div>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f7fa;border-radius:12px;">
         <tr>
-            <td style="padding:14px 16px;color:#0f3a5c;">
-                <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;">Total</div>
+            <td style="padding:14px 16px;color:#0f3f67;">
+                <div style="font-size:12px;letter-spacing:1px;color:#f4903c;text-transform:uppercase;">Total</div>
                 <div style="font-size:20px;font-weight:700;">{{ amount_str }}</div>
             </td>
-            <td style="padding:14px 16px;text-align:right;color:#0f3a5c;">
-                <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;">Envío</div>
+            <td style="padding:14px 16px;text-align:right;color:#0f3f67;">
+                <div style="font-size:12px;letter-spacing:1px;color:#f4903c;text-transform:uppercase;">Envío</div>
                 <div style="font-size:14px;font-weight:600;">{{ shipped_label }}</div>
                 <div style="font-size:12px;color:#4f5b67;">{{ tracking }}</div>
             </td>
@@ -27,22 +27,22 @@
     {% if pickup_bazar %}
     <div style="margin-top:12px;padding:14px 16px;border-radius:12px;background:#eef7ef;border-left:4px solid #3d9970;">
         <div style="font-size:12px;letter-spacing:1px;color:#2e7d4f;text-transform:uppercase;margin-bottom:6px;">🎪 El cliente recoge en bazar</div>
-        <div style="font-size:15px;font-weight:700;color:#0f3a5c;">{{ pickup_bazar.name }}</div>
+        <div style="font-size:15px;font-weight:700;color:#0f3f67;">{{ pickup_bazar.name }}</div>
         <div style="color:#4f5b67;font-size:13px;line-height:1.6;margin-top:4px;">
             📅 {{ pickup_bazar.date_str }}{% if pickup_bazar.schedule %} · 🕛 {{ pickup_bazar.schedule }}{% endif %}<br/>
             📍 {{ pickup_bazar.address }}
-            {% if pickup_bazar.google_maps_url %}<br/><a href="{{ pickup_bazar.google_maps_url }}" style="color:#f08c2c;font-weight:600;text-decoration:none;">🗺️ Ver en Google Maps</a>{% endif %}
+            {% if pickup_bazar.google_maps_url %}<br/><a href="{{ pickup_bazar.google_maps_url }}" style="color:#14507a;font-weight:600;text-decoration:none;">🗺️ Ver en Google Maps</a>{% endif %}
         </div>
     </div>
     {% endif %}
 
     <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:#fef4e8;">
-        <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Cliente</div>
-        <div style="color:#0f3a5c;font-weight:600;">{{ customer_email }}</div>
+        <div style="font-size:12px;letter-spacing:1px;color:#f4903c;text-transform:uppercase;margin-bottom:6px;">Cliente</div>
+        <div style="color:#0f3f67;font-weight:600;">{{ customer_email }}</div>
     </div>
 
     <div style="margin-top:16px;padding:14px 16px;border-radius:12px;background:#fef4e8;">
-        <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:10px;">Artículos</div>
+        <div style="font-size:12px;letter-spacing:1px;color:#f4903c;text-transform:uppercase;margin-bottom:10px;">Artículos</div>
         <table style="width:100%;border-collapse:collapse;">
             <thead>
                 <tr>
@@ -60,14 +60,14 @@
                         <img src="{{ item.image_url }}" width="48" height="48" alt="{{ item.title }}" style="border-radius:6px;object-fit:cover;">
                         {% endif %}
                     </td>
-                    <td style="padding:8px 0;color:#0f3a5c;font-weight:600;">
+                    <td style="padding:8px 0;color:#0f3f67;font-weight:600;">
                         {{ item.title }}
                         {% if item.discount_pct %}
                         <span style="display:inline-block;background:#fef0f0;color:#c0392b;font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;margin-left:6px;">-{{ item.discount_pct }}%</span>
                         {% endif %}
                     </td>
-                    <td style="padding:8px 0;text-align:center;color:#0f3a5c;">{{ item.quantity }}</td>
-                    <td style="padding:8px 0;text-align:right;color:#0f3a5c;">
+                    <td style="padding:8px 0;text-align:center;color:#0f3f67;">{{ item.quantity }}</td>
+                    <td style="padding:8px 0;text-align:right;color:#0f3f67;">
                         {{ item.line_total_str }}
                         {% if item.original_total_str %}
                         <br/><span style="font-size:12px;color:#999;text-decoration:line-through;">{{ item.original_total_str }}</span>
@@ -76,7 +76,7 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="4" style="padding:8px 0;color:#0f3a5c;">Sin artículos</td>
+                    <td colspan="4" style="padding:8px 0;color:#0f3f67;">Sin artículos</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -85,8 +85,8 @@
 
     {% if shipping %}
     <div style="margin-top:16px;padding:12px;border-radius:12px;background:#fef4e8;">
-        <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Dirección de envío</div>
-        <div style="color:#0f3a5c;line-height:1.5;">
+        <div style="font-size:12px;letter-spacing:1px;color:#f4903c;text-transform:uppercase;margin-bottom:6px;">Dirección de envío</div>
+        <div style="color:#0f3f67;line-height:1.5;">
             {{ shipping.fullName }}<br/>
             {{ shipping.street }} {{ shipping.number }}<br/>
             {{ shipping.neighborhood }}, {{ shipping.city }}<br/>
@@ -98,7 +98,7 @@
     {% endif %}
 
     <div style="text-align:center;margin:24px 0 8px;">
-        <a href="{{ orders_link }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f3a5c;color:#ffffff;text-decoration:none;font-weight:700;">Ver en la tienda</a>
+        <a href="{{ orders_link }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f3f67;color:#ffffff;text-decoration:none;font-weight:700;">Ver en la tienda</a>
     </div>
 </div>
 {% endblock %}

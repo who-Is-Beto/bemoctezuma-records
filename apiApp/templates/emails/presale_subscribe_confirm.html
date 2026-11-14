@@ -3,15 +3,25 @@
 {% block preheader %}Un clic y te avisamos de cada preventa nueva{% endblock %}
 
 {% block content %}
-<div>
-    <div style="font-size:12px;letter-spacing:1px;color:#f08c2c;text-transform:uppercase;margin-bottom:6px;">Preventas</div>
-    <div style="font-size:24px;font-weight:700;color:#0f3a5c;margin:0 0 12px;">¿Te avisamos de las preventas?</div>
-    <p style="color:#4f5b67;font-size:15px;line-height:1.6;margin:0 0 20px;">
-        Confirma tu correo y te escribimos cada vez que abramos una preventa: el disco, el precio y hasta cuándo puedes apartarlo.
-    </p>
-    <a href="{{ confirm_link }}" style="display:inline-block;background:#f08c2c;color:#ffffff;font-weight:700;padding:12px 22px;border-radius:999px;text-decoration:none;">Sí, avísenme</a>
-    <p style="color:#8a96a3;font-size:13px;line-height:1.6;margin:20px 0 0;">
-        Si no pediste esto, ignora este correo y no te escribiremos.
+<div class="enter">
+    <div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#e85f3c;text-transform:uppercase;">Preventas</div>
+    <div class="h1" style="margin:8px 0 0;font-family:'Krona One','Helvetica Neue',Arial,sans-serif;font-size:26px;line-height:1.25;color:#14507a;">¿Te avisamos de las preventas?</div>
+    <p style="margin:12px 0 0;color:#4f5b67;font-size:15px;line-height:1.65;">
+        Confirma tu correo y te escribimos cada vez que abramos una. Cada aviso trae:
     </p>
 </div>
+<div class="enter enter-2">
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:14px;">
+        <tr><td width="28" style="padding:5px 0;color:#f4903c;font-weight:700;">&#10003;</td><td style="padding:5px 0;font-size:14px;color:#0f3f67;">El disco y cada una de sus versiones</td></tr>
+        <tr><td width="28" style="padding:5px 0;color:#f4903c;font-weight:700;">&#10003;</td><td style="padding:5px 0;font-size:14px;color:#0f3f67;">El precio y con cuánto lo apartas</td></tr>
+        <tr><td width="28" style="padding:5px 0;color:#f4903c;font-weight:700;">&#10003;</td><td style="padding:5px 0;font-size:14px;color:#0f3f67;">Hasta cuándo puedes apartarlo</td></tr>
+    </table>
+    <div style="margin-top:24px;">
+        <a class="btn" href="{{ confirm_link }}" style="display:inline-block;background:#f4903c;color:#1b1f2a;font-size:15px;font-weight:700;padding:15px 30px;border-radius:999px;text-decoration:none;">Sí, avísenme &rarr;</a>
+    </div>
+</div>
+{% endblock %}
+
+{% block footer_note %}
+<p style="margin:0 0 12px;">Si no pediste esto, ignora este correo y no te escribiremos.</p>
 {% endblock %}

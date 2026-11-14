@@ -15,6 +15,14 @@ D = Decimal
 
 
 @pytest.mark.django_db
+def test_order_email_shows_how_much_is_paid():
+    order = make_order()
+    svc.record_payment(order, D('200'), 'cash')
+    send_presale_email(order, 'payment')
+    assert 'width:25%' in mail.outbox[-1].alternatives[0][0]
+
+
+@pytest.mark.django_db
 def test_reserved_email_has_code_balance_and_qr():
     order = make_order()
     svc.record_payment(order, D('300'), 'cash')
