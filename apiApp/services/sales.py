@@ -114,8 +114,8 @@ ONLINE_SALE_STATUSES = ('paid', 'shipped', 'delivered')
 
 def _paid_presales(date_from=None, date_to=None):
     """Presale orders whose record price is fully paid, on the store day it got paid."""
-    orders = PreSaleOrder.objects.filter(paid_at__isnull=False).exclude(status='cancelado').select_related(
-        'option__presale', 'option__owner').prefetch_related('payments')
+    orders = PreSaleOrder.objects.filter(paid_at__isnull=False).exclude(status='cancelado').prefetch_related(
+        'payments', 'items__option__presale', 'items__option__owner')
     if date_from:
         orders = orders.filter(paid_at__date__gte=date_from)
     if date_to:
@@ -143,18 +143,25 @@ def presale_figures(order):
     total_item = sum(item_paid.values(), ZERO)
     split = {m: _cents(gross * amount / total_item) for m, amount in item_paid.items()} if total_item else {}
     labels = dict(order.payments.model.METHODS)
-    cost = order.option.cost_price or ZERO
+    # One sale line per version, shaped like a point-of-sale line (price = per copy, net of discount).
+    lines = [
+        SimpleNamespace(record=None, option=item.option, owner=item.option.owner, owner_id=item.option.owner_id,
+                        price=item.unit_price - item.unit_discount, quantity=item.quantity,
+                        cost_price=item.option.cost_price or ZERO)
+        for item in order.items.all()
+    ]
+    cost, uncosted = _costs(lines)
     return {
         'gross': gross,
         'commission': commission,
         'shipping': shipping,
         'cost': cost,
-        'uncosted': 0 if cost else 1,
+        'uncosted': uncosted,
+        'units': sum(line.quantity for line in lines),
         'split': split,
         'dominant': max(split, key=split.get) if split else 'unknown',
         'method_label': ' + '.join(labels.get(m, m) for m in item_paid),
-        'line': SimpleNamespace(record=None, owner=order.option.owner, price=gross, quantity=1,
-                                cost_price=cost),
+        'lines': lines,
     }
 
 
@@ -350,16 +357,18 @@ def sales_metrics(date_from=None, date_to=None):
         gross, commission = figures['gross'], figures['commission']
         cost, uncosted = figures['cost'], figures['uncosted']
         for bucket in (channels['presale'], days[timezone.localdate(order.paid_at)]['presale']):
-            _add(bucket, gross, commission, units=1, cost=cost, units_without_cost=uncosted)
+            _add(bucket, gross, commission, units=figures['units'], cost=cost, units_without_cost=uncosted)
         for name, part in figures['split'].items():
             share = part / gross if gross else ZERO
             _add(methods[name], part, commission * share, count=int(name == figures['dominant']), units=0,
                  cost=cost * share, units_without_cost=0)
         shipping += figures['shipping']
-        presale = order.option.presale
-        add_record(f'presale:{order.option_id}', f'{presale.title} · {order.option.name}', presale.artist,
-                   None, 1, gross)
-        add_owner(figures['line'].owner, figures['line'], gross, commission)
+        for line in figures['lines']:
+            line_gross = line.price * line.quantity
+            presale = line.option.presale
+            add_record(f'presale:{line.option.id}', f'{presale.title} · {line.option.name}', presale.artist,
+                       None, line.quantity, line_gross)
+            add_owner(line.owner, line, line_gross, commission * line_gross / gross if gross else ZERO)
 
     summary = _bucket()
     for bucket in channels.values():
@@ -460,52 +469,58 @@ def sales_csv_rows(date_from=None, date_to=None, owner_id=None):
             ))
     for order in _paid_presales(date_from, date_to):
         figures = presale_figures(order)
-        line = figures['line']
-        if owner_id and order.option.owner_id != owner_id:
-            continue
-        presale = order.option.presale
-        rows.append(row(
-            order.paid_at, 'Preventa', 'Preventa', order.code, figures['method_label'] or 'Sin registrar',
-            order.buyer_email or (order.user.email if order.user_id else ''), line,
-            f'{presale.title} · {order.option.name}', presale.artist, figures['commission'],
-        ))
+        for line in figures['lines']:
+            if owner_id and line.owner_id != owner_id:
+                continue
+            line_gross = line.price * line.quantity
+            presale = line.option.presale
+            rows.append(row(
+                order.paid_at, 'Preventa', 'Preventa', order.code, figures['method_label'] or 'Sin registrar',
+                order.buyer_email or (order.user.email if order.user_id else ''), line,
+                f'{presale.title} · {line.option.name}', presale.artist,
+                figures['commission'] * line_gross / figures['gross'] if figures['gross'] else ZERO,
+            ))
     rows.sort(key=lambda r: r[0])
     return [values for _, values in rows]
 
 
 def notify_presale_owner(order):
-    """Consignor email when their presale copy is fully paid (once per order). Never raises."""
-    owner = order.option.owner
-    if owner is None or order.owner_notified:
+    """Consignor emails when a presale order is fully paid: one per owner, listing
+    their versions in it (once per order). Never raises."""
+    if order.owner_notified:
         return
-    presale = order.option.presale
-    try:
-        send_email(
-            template_name="owner_sale",
-            context={
-                "owner_name": owner.name,
-                "sale_id": order.code,
-                "sold_at": timezone.localtime(order.paid_at or timezone.now()).strftime("%d/%m/%Y %H:%M"),
-                "items": [{
-                    "title": f"{presale.title} · {order.option.name}",
-                    "artist": presale.artist,
-                    "image_url": None,
-                    "quantity": 1,
-                    "price_str": _money(order.item_price),
-                    "subtotal_str": _money(order.item_price),
-                }],
-                "payment_method": "Preventa",
-                "has_commission": False,
-                "commission_rate": "0.00",
-                "gross_str": _money(order.item_price),
-                "commission_str": _money(ZERO),
-                "total_str": _money(order.item_price),
-                "frontend_url": settings.FRONTEND_URL,
-            },
-            subject=f"Vendimos tu disco en preventa 🎶 — {order.code}",
-            to=[owner.email],
-        )
-    except Exception:
-        logger.exception("Presale %s: email to owner %s failed", order.code, owner.email)
-        return
+    by_owner = defaultdict(list)
+    for item in order.items.select_related('option__presale', 'option__owner'):
+        if item.option.owner_id:
+            by_owner[item.option.owner].append(item)
+    for owner, items in by_owner.items():
+        gross = sum((item.line_total for item in items), ZERO)
+        try:
+            send_email(
+                template_name="owner_sale",
+                context={
+                    "owner_name": owner.name,
+                    "sale_id": order.code,
+                    "sold_at": timezone.localtime(order.paid_at or timezone.now()).strftime("%d/%m/%Y %H:%M"),
+                    "items": [{
+                        "title": f"{item.option.presale.title} · {item.option.name}",
+                        "artist": item.option.presale.artist,
+                        "image_url": None,
+                        "quantity": item.quantity,
+                        "price_str": _money(item.unit_price - item.unit_discount),
+                        "subtotal_str": _money(item.line_total),
+                    } for item in items],
+                    "payment_method": "Preventa",
+                    "has_commission": False,
+                    "commission_rate": "0.00",
+                    "gross_str": _money(gross),
+                    "commission_str": _money(ZERO),
+                    "total_str": _money(gross),
+                    "frontend_url": settings.FRONTEND_URL,
+                },
+                subject=f"Vendimos tu disco en preventa 🎶 — {order.code}",
+                to=[owner.email],
+            )
+        except Exception:
+            logger.exception("Presale %s: email to owner %s failed", order.code, owner.email)
     PreSaleOrder.objects.filter(pk=order.pk).update(owner_notified=True)

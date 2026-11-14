@@ -108,3 +108,31 @@ def test_consignor_owner_emailed_once_when_paid():
     assert [m.to for m in mail.outbox] == [['juan@x.com']]
     order.refresh_from_db()
     assert order.owner_notified is True
+
+
+@pytest.mark.django_db
+def test_metrics_split_lines_by_version():
+    red = make_option(name='Rojo', cost_price=D('300'))
+    black = make_option(red.presale, name='Negro', price=D('600'), cost_price=D('200'))
+    order = make_order(lines=[(red, 2), (black, 1)])
+    svc.record_payment(order, D('2200'), 'cash')
+    metrics = sales_metrics()
+    presale = channel(metrics, 'presale')
+    assert presale['gross'] == '2200.00' and presale['cost'] == '800.00' and presale['units'] == 3
+    rows = {r['title']: r for r in metrics['top_records']}
+    assert rows['Kind of Blue · Rojo']['gross'] == '1600.00'
+    assert rows['Kind of Blue · Negro']['gross'] == '600.00'
+
+
+@pytest.mark.django_db
+def test_owner_emails_go_per_owner():
+    ana = Owner.objects.create(name='Ana', email='ana-owner@example.com')
+    luis = Owner.objects.create(name='Luis', email='luis-owner@example.com')
+    red = make_option(name='Rojo', owner=ana)
+    black = make_option(red.presale, name='Negro', price=D('600'), owner=luis)
+    order = make_order(lines=[(red, 1), (black, 1)])
+    svc.record_payment(order, D('1400'), 'cash')
+    sent = sorted(m.to[0] for m in mail.outbox if 'preventa' in m.subject.lower())
+    assert sent == ['ana-owner@example.com', 'luis-owner@example.com']
+    order.refresh_from_db()
+    assert order.owner_notified
