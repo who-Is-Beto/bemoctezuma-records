@@ -127,7 +127,8 @@ def presale_figures(order):
     """Ventas numbers of a paid presale order.
 
     Gross = item_price (shipping is pass-through, reported apart). Commission =
-    estimated Stripe fee on each online payment; store payments carry none.
+    estimated Stripe fee on each online payment plus the card commission
+    (CARD_COMMISSION_RATE) on each in-store card payment; cash/transfer carry none.
     Gross is split across payment methods by what each line paid for the record.
     """
     payments = [p for p in order.payments.all() if p.voided_at is None]
@@ -139,6 +140,8 @@ def presale_figures(order):
         shipping += payment.shipping_amount
         if payment.method == 'stripe':
             commission += estimated_stripe_fee(payment.amount)
+        elif payment.method == 'card':
+            commission += _cents(payment.amount * CARD_COMMISSION_RATE / 100)
     gross = order.item_price
     total_item = sum(item_paid.values(), ZERO)
     split = {m: _cents(gross * amount / total_item) for m, amount in item_paid.items()} if total_item else {}

@@ -215,10 +215,14 @@ def presale_settle(request, code):
     due = svc.balance(order)
     if due <= 0:
         return presale_error(svc.PresaleError('nothing_due'))
-    shipping_amount = svc.shipping_due(order)
     try:
-        session = _checkout(order, purpose='settle', item_amount=due - shipping_amount,
-                            shipping_amount=shipping_amount, item_label='liquidación')
+        item_amount, shipping_amount = svc.settle_split(order, request.data.get('amount'))
+    except svc.PresaleError as exc:
+        return presale_error(exc)
+    label = 'liquidación' if item_amount + shipping_amount == due else 'abono'
+    try:
+        session = _checkout(order, purpose='settle', item_amount=item_amount,
+                            shipping_amount=shipping_amount, item_label=label)
     except Exception as exc:
         logger.exception("Stripe settle session for presale %s failed", order.code)
         return error_response("No pudimos iniciar el pago. Intenta de nuevo.", status_code=502,

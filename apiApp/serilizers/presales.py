@@ -135,6 +135,8 @@ def presale_order_payload(order, request=None):
         'shipping_estimate': money(order.shipping_estimate),
         'shipping_cost': money(order.shipping_cost),
         'shipping_pending': svc.shipping_pending(order),
+        # Part of the balance that is shipping (abonos cover records only).
+        'shipping_due': money(svc.shipping_due(order)),
         'total': money(svc.total_due(order)),
         'paid': money(paid),
         'balance': money(svc.balance(order)),

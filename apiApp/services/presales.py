@@ -55,6 +55,7 @@ class PresaleError(Exception):
         'invalid_items': 'Revisa las versiones y cantidades.',
         'limit_exceeded': 'Llegaste al máximo por persona de esta versión.',
         'paid_not_enough': 'Falta pagar para entregar esto.',
+        'invalid_partial': 'Abona desde $100 en múltiplos de $50, o liquida lo que falta.',
     }
 
     def __init__(self, code, message=None):
@@ -488,6 +489,25 @@ def quote_shipping(lines, zip_code):
 def shipping_paid(order):
     total = order.payments.filter(voided_at__isnull=True).aggregate(s=Sum('shipping_amount'))['s']
     return (total or ZERO).quantize(CENT)
+
+
+ABONO_MIN = Decimal('100')
+ABONO_STEP = Decimal('50')
+
+
+def settle_split(order, amount=None):
+    """(record part, shipping part) to charge online. No ``amount`` or the whole
+    balance settles everything; otherwise an abono: >= $100, a multiple of $50,
+    records only (shipping waits for the final payment)."""
+    due, shipping = balance(order), shipping_due(order)
+    if amount in (None, ''):
+        return due - shipping, shipping
+    amount = _money(amount)
+    if amount == due:
+        return due - shipping, shipping
+    if amount < ABONO_MIN or amount % ABONO_STEP or amount > due - shipping:
+        raise PresaleError('invalid_partial')
+    return amount, ZERO
 
 
 def shipping_due(order):
