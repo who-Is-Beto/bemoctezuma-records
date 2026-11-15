@@ -15,7 +15,7 @@ on:
       ref:
         description: Ref (branch or SHA) to deploy to staging from
         required: false
-        default: 'main'
+        default: 'stage'
 
 concurrency:
   group: sync-stage-db
@@ -79,10 +79,15 @@ jobs:
             'docker run --rm "$PG_IMAGE" pg_dump -Fc "$DATABASE_PUBLIC_URL"' \
             > prod.dump
 
+      # Staging runs `stage` code, which can carry migrations prod doesn't have.
+      # `pg_restore --clean` only drops objects in the dump, so those tables
+      # would survive while django_migrations loses their rows and the next
+      # `migrate` fails. Start from an empty schema instead.
       - name: Restore into staging database
         run: |
           railway run -p "$RAILWAY_PROJECT_ID" -e "$STAGE_ENV" -s "$DB_SERVICE" bash -c \
-            'docker run --rm -i "$PG_IMAGE" pg_restore --no-owner --no-privileges --clean --if-exists -d "$DATABASE_PUBLIC_URL"' \
+            'docker run --rm "$PG_IMAGE" psql "$DATABASE_PUBLIC_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" &&
+             docker run --rm -i "$PG_IMAGE" pg_restore --no-owner --no-privileges -d "$DATABASE_PUBLIC_URL"' \
             < prod.dump
 
   deploy-stage:
@@ -92,12 +97,12 @@ jobs:
     if: always() && needs.sync-db.result == 'success'
     steps:
       # `railway up` uploads the checked-out working directory as the deploy
-      # source, so the repo MUST be cloned first. On a prod deployment_status
-      # event this checks out the exact deployed SHA (code == prod); on a
-      # manual dispatch it checks out the `ref` input (default `main`).
+      # source, so the repo MUST be cloned first. Staging runs the `stage`
+      # branch (a prod deploy only refreshes its data); a manual dispatch can
+      # pick another ref.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'deployment_status' && (github.event.deployment.sha || github.sha) || inputs.ref }}
+          ref: ${{ inputs.ref || 'stage' }}
 
       - uses: actions/setup-node@v4
         with:
