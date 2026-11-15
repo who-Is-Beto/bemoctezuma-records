@@ -93,7 +93,7 @@ def _line(name, amount):
             'quantity': 1}
 
 
-def _record_lines(order, presale, item_amount, item_label):
+def _record_lines(order, item_amount, item_label):
     """Stripe lines for the records: one per version on a reservation (``item_amount``
     spread by each line's share, cents rounded, the remainder on the last), one on a settle."""
     if item_amount <= 0:
@@ -101,20 +101,21 @@ def _record_lines(order, presale, item_amount, item_label):
     items = list(order.items.all())
     if item_label == 'liquidación' or len(items) == 1:
         label = f"{items[0].option.name} ×{items[0].quantity}" if len(items) == 1 else svc.lines_label(order)
-        return [_line(f"{presale.title} — {label} ({item_label})", item_amount)]
+        title = svc.order_title(order)
+        return [_line(f"{title} — {label} ({item_label})", item_amount)]
     total = sum((item.line_total for item in items), Decimal('0'))
     lines, given = [], Decimal('0')
     for index, item in enumerate(items):
         share = item_amount - given if index == len(items) - 1 else \
             (Decimal(item_amount) * item.line_total / total).quantize(svc.CENT)
         given += share
-        lines.append(_line(f"{presale.title} — {item.option.name} ×{item.quantity} ({item_label})", share))
+        lines.append(_line(f"{item.option.presale.title} — {item.option.name} ×{item.quantity} ({item_label})", share))
     return lines
 
 
 def _checkout(order, *, purpose, item_amount, shipping_amount, item_label):
-    presale = order.items.all()[0].option.presale
-    line_items = _record_lines(order, presale, item_amount, item_label)
+    presales = svc.order_presales(order)
+    line_items = _record_lines(order, item_amount, item_label)
     if shipping_amount > 0:
         line_items.append(_line("Envío", shipping_amount))
     frontend = settings.FRONTEND_URL.rstrip('/')
@@ -124,7 +125,7 @@ def _checkout(order, *, purpose, item_amount, shipping_amount, item_label):
         mode='payment',
         locale='es',
         success_url=f"{frontend}/mis-ordenes?presale_session={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{frontend}/preventas/{presale.slug}" if purpose == 'reserve' else f"{frontend}/mis-ordenes",
+        cancel_url=(f"{frontend}/preventas/{presales[-1].slug}" if purpose == 'reserve' else f"{frontend}/mis-ordenes"),
         customer_email=order.user.email if order.user else None,
         client_reference_id=order.code,
         expires_at=int(time.time()) + svc.CHECKOUT_MINUTES * 60,

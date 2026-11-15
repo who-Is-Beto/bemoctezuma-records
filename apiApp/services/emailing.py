@@ -299,10 +299,12 @@ def _money_str(value):
 def _presale_email_context(order, kind):
     from . import presales as svc
     items = list(order.items.select_related('option__presale'))
-    presale = items[0].option.presale
+    presales = svc.order_presales(order)
+    presale = presales[0]
+    multi = len(presales) > 1
     balance = svc.balance(order)
     subject, headline, intro = PRESALE_EMAILS[kind]
-    label = lambda lines: ', '.join(f'{i.option.name} ×{i.quantity}' for i in lines)  # noqa: E731
+    label = lambda lines: ', '.join(f'{svc.line_name(i, multi)} ×{i.quantity}' for i in lines)  # noqa: E731
     missing = [i for i in items if not i.arrived_at]
     if kind == 'arrived' and missing:
         intro = f"Llegó: {label(i for i in items if i.arrived_at)}. Falta: {label(missing)}."
@@ -322,10 +324,11 @@ def _presale_email_context(order, kind):
         "headline": headline,
         "intro": intro,
         "code": order.code,
-        "title": presale.title,
-        "artist": presale.artist,
+        "title": svc.order_title(order),
+        "artist": ' · '.join(dict.fromkeys(p.artist for p in presales)),
         "lines": [
-            {"name": i.option.name, "quantity": i.quantity, "image_url": _image_url(i.option.image or presale.cover),
+            {"name": svc.line_name(i, multi), "quantity": i.quantity,
+             "image_url": _image_url(i.option.image or i.option.presale.cover),
              "arrived": i.arrived_at is not None, "delivered": i.delivered_at is not None}
             for i in items
         ],
@@ -386,12 +389,13 @@ def send_presale_store_notice(order, kind):
                 "overpaid": kind == 'overpaid',
                 "order": order,
                 "presale": presale,
+                "order_title": svc.order_title(order),
                 "lines_label": svc.lines_label(order),
                 "paid": _money_str(svc.paid_amount(order)),
                 "balance": _money_str(svc.balance(order)),
                 "admin_link": _frontend(f"/admin?tab=presales&code={order.code}"),
             },
-            subject=f"{title}: {presale.title} · {order.code}",
+            subject=f"{title}: {svc.order_title(order)} · {order.code}",
             to=recipients,
         )
         return True
