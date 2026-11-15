@@ -303,9 +303,9 @@ def _presale_email_context(order, kind):
     balance = svc.balance(order)
     subject, headline, intro = PRESALE_EMAILS[kind]
     label = lambda lines: ', '.join(f'{i.option.name} ×{i.quantity}' for i in lines)  # noqa: E731
-    missing = [i for i in items if not i.option.arrived_at]
+    missing = [i for i in items if not i.arrived_at]
     if kind == 'arrived' and missing:
-        intro = f"Llegó: {label(i for i in items if i.option.arrived_at)}. Falta: {label(missing)}."
+        intro = f"Llegó: {label(i for i in items if i.arrived_at)}. Falta: {label(missing)}."
     elif kind == 'arrived':
         if balance > 0:
             intro = f"Liquida {_money_str(balance)} y es tuyo."
@@ -326,7 +326,7 @@ def _presale_email_context(order, kind):
         "artist": presale.artist,
         "lines": [
             {"name": i.option.name, "quantity": i.quantity, "image_url": _image_url(i.option.image or presale.cover),
-             "arrived": i.option.arrived_at is not None, "delivered": i.delivered_at is not None}
+             "arrived": i.arrived_at is not None, "delivered": i.delivered_at is not None}
             for i in items
         ],
         "cover_url": _presale_cover(presale),

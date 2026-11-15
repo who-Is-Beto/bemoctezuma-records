@@ -18,6 +18,8 @@ def make_option(presale=None, **kw):
     data = dict(name='Vinilo rojo', price=Decimal('800'), min_deposit=Decimal('200'),
                 full_payment_discount=Decimal('50'), copies=10)
     data.update(kw)
+    if data.get('arrived_at'):  # an arrived version has every copy in (as migration 0060 backfills)
+        data.setdefault('arrived_copies', data['copies'])
     return PreSaleOption.objects.create(presale=presale or make_presale(), **data)
 
 
@@ -33,5 +35,5 @@ def make_order(option=None, quantity=1, lines=None, **kw):
     unit_discount = order.discount_applied / lines[0][1] if len(lines) == 1 else Decimal('0')
     for opt, qty in lines:
         PreSaleOrderItem.objects.create(order=order, option=opt, quantity=qty, unit_price=opt.price,
-                                        unit_discount=unit_discount)
+                                        unit_discount=unit_discount, arrived_at=opt.arrived_at)
     return order

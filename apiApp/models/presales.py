@@ -86,7 +86,10 @@ class PreSaleOption(models.Model):
     # Hidden from new reservations (an option with orders is never deleted).
     is_active = models.BooleanField(default=True)
     position = models.PositiveIntegerField(default=0)
+    # Set once every copy is at the store; copies can arrive in several batches.
     arrived_at = models.DateTimeField(null=True, blank=True)
+    # Copies at the store so far, handed to order lines by priority (services.presales.allocate_arrivals).
+    arrived_copies = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ('position', 'id')
@@ -196,6 +199,8 @@ class PreSaleOrderItem(models.Model):
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     # Full-payment discount per copy (0 unless paid in full at reservation).
     unit_discount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    # This line's copies are at the store and set aside for this buyer.
+    arrived_at = models.DateTimeField(null=True, blank=True)
     # Pickup can hand over the lines that arrived before the rest.
     delivered_at = models.DateTimeField(null=True, blank=True)
     delivered_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
