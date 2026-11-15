@@ -217,18 +217,11 @@ def admin_presale_publish(request, presale_id):
     return Response({'status': presale.status, 'recipients': recipients})
 
 
-def _arrive(request, options):
-    from ..services.emailing import send_presale_email
-    # An order with several versions arriving together gets one email.
-    orders = {order.pk: order for option in options for order in svc.mark_arrived(option, by=request.user)}
-    for order in orders.values():
-        order.refresh_from_db()
-        if order.delivery == 'shipping' and order.shipping_cost is None and svc.all_arrived(order):
-            try:
-                svc.requote_shipping(order, by=request.user)
-            except (svc.PresaleError, ShippingQuoteError) as exc:
-                logger.warning("Could not re-quote shipping for %s: %s", order.code, exc)
-        send_presale_email(order, 'arrived')
+def _arrive(request, options, copies=None):
+    # Count first, then hand out once: an order with several versions gets one email.
+    for option in options:
+        svc.count_arrival(option, copies)
+    svc.hand_out(options, by=request.user)
 
 
 @api_view(['POST'])
@@ -240,7 +233,13 @@ def admin_presale_option_arrived(request, option_id):
     option = PreSaleOption.objects.select_related('presale').filter(pk=option_id).first()
     if option is None:
         return _not_found()
-    _arrive(request, [option])
+    copies = request.data.get('copies')
+    try:
+        _arrive(request, [option], copies=int(copies) if copies not in (None, '') else None)
+    except (TypeError, ValueError):
+        return presale_error(svc.PresaleError('invalid_amount'))
+    except svc.PresaleError as exc:
+        return presale_error(exc)
     return Response(PreSaleAdminSerializer(option.presale, context={'request': request}).data)
 
 

@@ -55,6 +55,7 @@ class PresaleError(Exception):
         'invalid_items': 'Revisa las versiones y cantidades.',
         'limit_exceeded': 'Llegaste al máximo por persona de esta versión.',
         'paid_not_enough': 'Falta pagar para entregar esto.',
+        'refund_failed': 'Stripe no pudo hacer el reembolso; el pago sigue vigente.',
         'invalid_partial': 'Abona desde $100 en múltiplos de $50, o liquida lo que falta.',
     }
 
@@ -128,12 +129,12 @@ def lines_label(order):
 
 
 def all_arrived(order):
-    return all(item.option.arrived_at for item in order.items.all())
+    return all(item.arrived_at for item in order.items.all())
 
 
 def last_arrival(order):
-    """When the last version of the order arrived; None while any is on its way."""
-    dates = [item.option.arrived_at for item in order.items.all()]
+    """When the last line of the order arrived; None while any is on its way."""
+    dates = [item.arrived_at for item in order.items.all()]
     return max(dates) if dates and all(dates) else None
 
 
@@ -345,6 +346,8 @@ def record_payment(order, amount, method, *, note='', registered_by=None, stripe
     )
     _log(order, 'payment', f'${amount} · {payment.get_method_display()}', registered_by)
     refresh_status(order, registered_by)
+    hand_out([item.option for item in order.items.select_related('option') if not item.arrived_at],
+             by=registered_by)
     return payment
 
 
@@ -354,6 +357,9 @@ def void_payment(payment, *, by, reason):
         raise PresaleError('reason_required')
     if payment.voided_at:
         return
+    if payment.method == 'stripe':
+        # Money paid online goes back through Stripe first; the line is voided only once refunded.
+        reason = f"{reason} · reembolso Stripe {_stripe_refund(payment)}"
     payment.voided_at = timezone.now()
     payment.voided_by = by
     payment.void_reason = reason[:200]
@@ -363,16 +369,111 @@ def void_payment(payment, *, by, reason):
     refresh_status(order, by)
 
 
-def mark_arrived(option, *, by):
-    """The version arrived at the store: re-derive every order that has a line of it."""
-    option.arrived_at = option.arrived_at or timezone.now()
-    option.save(update_fields=['arrived_at'])
-    orders = list(PreSaleOrder.objects.filter(items__option=option).exclude(
-        status__in=('pending_payment',) + LOCKED_STATUSES).distinct())
-    for order in orders:
-        _log(order, 'arrived', option.name, by)
+def _arrival_priority(item):
+    """Paid in full first (by when they finished paying), then by first payment."""
+    order = item.order
+    if order.paid_at:
+        return (0, order.paid_at, item.pk)
+    first = min((p.created_at for p in order.payments.all() if p.voided_at is None), default=order.reserved_at)
+    return (1, first, item.pk)
+
+
+def allocate_arrivals(option):
+    """Hand the version's unassigned arrived copies to waiting lines by priority.
+
+    A line gets all its copies or waits (copies of one line are handed over
+    together); a smaller line further down can take what a bigger one couldn't.
+    Returns the orders that got copies.
+    """
+    with transaction.atomic():
+        option = PreSaleOption.objects.select_for_update().get(pk=option.pk)
+        items = list(option.items.select_related('order').prefetch_related('order__payments')
+                     .exclude(order__status__in=('pending_payment', 'vencido', 'cancelado')))
+        free = option.arrived_copies - sum(i.quantity for i in items if i.arrived_at)
+        now, orders = timezone.now(), {}
+        for item in sorted((i for i in items if not i.arrived_at), key=_arrival_priority):
+            if item.quantity <= free:
+                item.arrived_at = now
+                item.save(update_fields=['arrived_at'])
+                free -= item.quantity
+                orders[item.order_id] = item.order
+    return list(orders.values())
+
+
+def _stripe_refund(payment):
+    """Refund ``payment`` in full through Stripe; returns the refund id. Idempotent per payment."""
+    import stripe
+    from django.conf import settings
+    if not payment.stripe_checkout_session_id:
+        raise PresaleError('refund_failed', 'Este pago no tiene sesión de Stripe; reembólsalo desde Stripe.')
+    try:
+        session = stripe.checkout.Session.retrieve(payment.stripe_checkout_session_id,
+                                                   api_key=settings.STRIPE_SECRET_KEY)
+        refund = stripe.Refund.create(
+            payment_intent=session.get('payment_intent'),
+            amount=int((payment.amount * 100).quantize(Decimal('1'))),
+            metadata={'kind': 'presale', 'order_code': payment.order.code, 'payment_id': str(payment.pk)},
+            idempotency_key=f'presale-payment-{payment.pk}-refund',
+            api_key=settings.STRIPE_SECRET_KEY,
+        )
+    except stripe.StripeError as exc:
+        logger.warning("Stripe refund for presale payment %s failed: %s", payment.pk, exc)
+        raise PresaleError('refund_failed')
+    return refund.get('id')
+
+
+def mark_arrived(option, *, by, copies=None):
+    """``copies`` more copies of the version reached the store (``None``: all of them).
+
+    They go to buyers by priority (allocate_arrivals); every order that got
+    copies is re-derived, emailed and returned.
+    """
+    count_arrival(option, copies)
+    return hand_out([option], by=by)
+
+
+def count_arrival(option, copies=None):
+    """Add ``copies`` (``None``: all) to the version's arrived count; nobody is assigned yet."""
+    if copies is None:
+        option.arrived_copies = option.copies
+    else:
+        if copies <= 0:
+            raise PresaleError('invalid_amount')
+        option.arrived_copies = min(option.arrived_copies + copies, option.copies)
+    if option.arrived_copies >= option.copies:
+        option.arrived_at = option.arrived_at or timezone.now()
+    option.save(update_fields=['arrived_copies', 'arrived_at'])
+
+
+def hand_out(options, *, by):
+    """Give spare arrived copies of ``options`` to waiting buyers; each order that
+    got copies is re-derived, re-quoted for shipping once complete, and emailed once."""
+    from .emailing import send_presale_email
+    orders = {}
+    for option in options:
+        if not option.arrived_copies:
+            continue
+        for order in allocate_arrivals(option):
+            _log(order, 'arrived', option.name, by)
+            orders[order.pk] = order
+    for order in orders.values():
+        order.refresh_from_db()
         refresh_status(order, by)
-    return orders
+        if order.delivery == 'shipping' and order.shipping_cost is None and all_arrived(order):
+            try:
+                requote_shipping(order, by=by)
+            except (PresaleError, shipping.ShippingQuoteError) as exc:
+                logger.warning("Could not re-quote shipping for %s: %s", order.code, exc)
+        send_presale_email(order, 'arrived')
+    return list(orders.values())
+
+
+def _release_copies(order, by):
+    """A cancelled/expired order gives its set-aside (not handed over) copies to the next buyers."""
+    options = [item.option for item in order.items.select_related('option')
+               if item.arrived_at and not item.delivered_at]
+    order.items.filter(delivered_at__isnull=True).update(arrived_at=None)
+    hand_out(options, by=by)
 
 
 def deliver(order, *, by, item_ids=None):
@@ -390,11 +491,11 @@ def deliver(order, *, by, item_ids=None):
     items = list(order.items.select_related('option'))
     pending = [item for item in items if item.delivered_at is None]
     if item_ids is None:
-        chosen = [item for item in pending if item.option.arrived_at]
+        chosen = [item for item in pending if item.arrived_at]
     else:
         wanted = {int(pk) for pk in item_ids}
         chosen = [item for item in pending if item.pk in wanted]
-        if len(chosen) != len(wanted) or any(not item.option.arrived_at for item in chosen):
+        if len(chosen) != len(wanted) or any(not item.arrived_at for item in chosen):
             raise PresaleError('invalid_items', 'Solo se entregan discos que ya llegaron y no se han entregado.')
     if not chosen:
         raise PresaleError('invalid_items', 'No hay discos por entregar.')
@@ -439,6 +540,7 @@ def cancel(order, *, by, reason):
     order.status = 'cancelado'
     order.save(update_fields=['status', 'updated_at'])
     _log(order, 'status', f'{previous} → cancelado: {reason}', by)
+    _release_copies(order, by)
 
 
 def expire(order, *, by):
@@ -448,6 +550,7 @@ def expire(order, *, by):
     order.status = 'vencido'
     order.save(update_fields=['status', 'updated_at'])
     _log(order, 'status', f'{previous} → vencido', by)
+    _release_copies(order, by)
 
 
 def reopen(order, *, by):
@@ -463,6 +566,7 @@ def reopen(order, *, by):
         order.save(update_fields=['status', 'updated_at'])
         _log(order, 'status', 'reabierto', by)
         refresh_status(order, by)
+    hand_out(list(options.values()), by=by)
 
 
 def quote_shipping(lines, zip_code):

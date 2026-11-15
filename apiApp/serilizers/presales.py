@@ -122,7 +122,7 @@ def presale_order_payload(order, request=None):
                 'unit_price': money(item.unit_price),
                 'unit_discount': money(item.unit_discount),
                 'line_total': money(item.line_total),
-                'arrived': item.option.arrived_at is not None,
+                'arrived': item.arrived_at is not None,
                 'delivered_at': item.delivered_at.isoformat() if item.delivered_at else None,
             }
             for item in items
@@ -170,8 +170,8 @@ class PreSaleOptionAdminSerializer(serializers.ModelSerializer):
         model = PreSaleOption
         fields = ['id', 'name', 'image', 'image_url', 'category', 'weight_grams', 'price', 'min_deposit',
                   'full_payment_discount', 'cost_price', 'owner', 'copies', 'max_per_buyer', 'is_active',
-                  'position', 'arrived_at', 'copies_left', 'taken', 'has_orders']
-        read_only_fields = ['arrived_at']
+                  'position', 'arrived_at', 'arrived_copies', 'copies_left', 'taken', 'has_orders']
+        read_only_fields = ['arrived_at', 'arrived_copies']
         extra_kwargs = {'image': {'write_only': True, 'required': False}}
 
     def get_image_url(self, obj):

@@ -69,10 +69,10 @@ def test_deadline_before_arrival_is_reservation_plus_120(option):
 
 def test_deadline_after_late_arrival_is_arrival_plus_15(option):
     order = make_order(option, reserved_at=timezone.now() - timedelta(days=200))
-    option.arrived_at = timezone.now() - timedelta(days=2)
-    option.save()
+    arrived = timezone.now() - timedelta(days=2)
+    order.items.update(arrived_at=arrived)  # the clock starts when the buyer's own copy arrives
     order.refresh_from_db()
-    assert svc.deadline(order) == timezone.localdate(option.arrived_at) + timedelta(days=15)
+    assert svc.deadline(order) == timezone.localdate(arrived) + timedelta(days=15)
 
 
 def test_deadline_override_wins_when_later(option):
