@@ -100,7 +100,11 @@ def held_by_user(option, user):
 
 
 def parse_items(raw, presale=None):
-    """[{option_id, quantity}] → [(PreSaleOption, qty)] of one presale, or PresaleError('invalid_items')."""
+    """[{option_id, quantity}] → [(PreSaleOption, qty)], or PresaleError('invalid_items').
+
+    One order can hold versions of several presales (one box, one payment);
+    with ``presale`` every line must belong to it.
+    """
     if not isinstance(raw, list) or not raw:
         raise PresaleError('invalid_items')
     wanted = {}
@@ -112,9 +116,9 @@ def parse_items(raw, presale=None):
             raise PresaleError('invalid_items')
         wanted[int(option_id)] = int(quantity)
     options = PreSaleOption.objects.select_related('presale', 'category').in_bulk(list(wanted))
-    if len(options) != len(wanted) or len({o.presale_id for o in options.values()}) != 1:
+    if len(options) != len(wanted):
         raise PresaleError('invalid_items')
-    if presale is not None and next(iter(options.values())).presale_id != presale.pk:
+    if presale is not None and any(o.presale_id != presale.pk for o in options.values()):
         raise PresaleError('invalid_items')
     return [(options[option_id], quantity) for option_id, quantity in wanted.items()]
 
@@ -123,9 +127,26 @@ def order_lines(order):
     return [(item.option, item.quantity) for item in order.items.all()]
 
 
+def order_presales(order):
+    """The presales in the order, in line order, each once."""
+    return list({item.option.presale_id: item.option.presale for item in order.items.all()}.values())
+
+
+def order_title(order):
+    """'Kind of Blue' or 'Kind of Blue + Abbey Road' (an order can span presales)."""
+    return ' + '.join(p.title for p in order_presales(order))
+
+
+def line_name(item, multi):
+    """'Rojo' or, when the order spans presales, 'Kind of Blue · Rojo'."""
+    return f'{item.option.presale.title} · {item.option.name}' if multi else item.option.name
+
+
 def lines_label(order):
-    """'Rojo ×2, Negro ×1'."""
-    return ', '.join(f'{item.option.name} ×{item.quantity}' for item in order.items.all())
+    """'Rojo ×2, Negro ×1' (presale titles in front when the order spans several)."""
+    items = list(order.items.all())
+    multi = len({i.option.presale_id for i in items}) > 1
+    return ', '.join(f'{line_name(item, multi)} ×{item.quantity}' for item in items)
 
 
 def all_arrived(order):

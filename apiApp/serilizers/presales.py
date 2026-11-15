@@ -99,25 +99,29 @@ def presale_is_open(presale):
 def presale_order_payload(order, request=None):
     """What a customer sees about their own presale order."""
     items = list(order.items.all())
-    presale = items[0].option.presale
+    presales = [{
+        'slug': p.slug,
+        'title': p.title,
+        'artist': p.artist,
+        'cover': media_url(p.cover, request),
+        'estimated_arrival': p.estimated_arrival,
+    } for p in svc.order_presales(order)]
     paid = svc.paid_amount(order)
     return {
         'code': order.code,
         'status': order.status,
         'status_label': order.get_status_display(),
-        'presale': {
-            'slug': presale.slug,
-            'title': presale.title,
-            'artist': presale.artist,
-            'cover': media_url(presale.cover, request),
-            'estimated_arrival': presale.estimated_arrival,
-        },
+        # First presale (most orders have one); `presales` lists every one in the order.
+        'presale': presales[0],
+        'presales': presales,
         'items': [
             {
                 'id': item.id,
                 'option_id': item.option_id,
                 'option_name': item.option.name,
-                'image': media_url(item.option.image or presale.cover, request),
+                'presale_slug': item.option.presale.slug,
+                'presale_title': item.option.presale.title,
+                'image': media_url(item.option.image or item.option.presale.cover, request),
                 'quantity': item.quantity,
                 'unit_price': money(item.unit_price),
                 'unit_discount': money(item.unit_discount),
@@ -227,15 +231,19 @@ def presale_totals(presale):
     collected = owed = svc.ZERO
     # reserved / paid_full count copies (an order can hold several).
     for order in orders.prefetch_related('payments', 'items__option'):
-        copies = sum(item.quantity for item in order.items.all())
-        paid = svc.paid_amount(order)
+        # An order can span presales: count this presale's copies and its share of the money.
+        mine = [item for item in order.items.all() if item.option.presale_id == presale.pk]
+        copies = sum(item.quantity for item in mine)
+        lines_total = sum((item.line_total for item in order.items.all()), svc.ZERO)
+        share = sum((item.line_total for item in mine), svc.ZERO) / lines_total if lines_total else 1
+        paid = svc.paid_amount(order) * share
         if order.status in ('cancelado', 'vencido'):
             expired += order.status == 'vencido'
             collected += paid if order.status == 'vencido' else svc.ZERO
             continue
         reserved += copies
         collected += paid
-        owed += svc.balance(order)
+        owed += svc.balance(order) * share
         paid_full += copies if svc.balance(order) == 0 and not svc.shipping_pending(order) else 0
     copies = sum(o.copies for o in presale.options.all())
     return {
@@ -253,6 +261,7 @@ def presale_admin_order_payload(order, request=None):
     data.update({
         'id': order.id,
         'presale_id': order.items.all()[0].option.presale_id,
+        'presale_ids': [p.pk for p in svc.order_presales(order)],
         'buyer_name': order.buyer_name,
         'buyer_email': order.buyer_email or (order.user.email if order.user else ''),
         'buyer_phone': order.buyer_phone,
