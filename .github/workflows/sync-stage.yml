@@ -41,12 +41,14 @@ jobs:
   sync-db:
     name: Copy prod DB → stage DB
     runs-on: ubuntu-latest
+    # Railway names GitHub deployment environments "<project> / <env>",
+    # e.g. "Moctezuma Records / production".
     if: >-
       github.event_name == 'workflow_dispatch'
       || (
         github.event_name == 'deployment_status'
         && github.event.deployment_status.state == 'success'
-        && github.event.deployment.environment == 'production'
+        && endsWith(github.event.deployment.environment, '/ production')
       )
     steps:
       - uses: actions/setup-node@v4
