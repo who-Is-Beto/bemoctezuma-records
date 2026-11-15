@@ -59,29 +59,27 @@ jobs:
       - name: Install Railway CLI (pinned)
         run: npm install -g @railway/cli@5.2.0
 
-      - name: Link project
-        run: railway link -p "$RAILWAY_PROJECT_ID" -e "$PROD_ENV" -s "$DB_SERVICE"
-
+      # No `railway link`: it calls the `me` query, which workspace tokens
+      # can't answer ("Unauthorized"). Every command passes -p instead.
       # The app's PG_HOST is Railway's private network host, unreachable from
       # a GitHub runner, so dump/restore go through the Postgres service's
       # DATABASE_PUBLIC_URL (TCP proxy). pg_dump refuses servers newer than
       # itself, so the client runs in a postgres image of the server's major.
       - name: Detect server major version
         run: |
-          major=$(railway run -e "$PROD_ENV" -s "$DB_SERVICE" bash -c \
+          major=$(railway run -p "$RAILWAY_PROJECT_ID" -e "$PROD_ENV" -s "$DB_SERVICE" bash -c \
             'docker run --rm postgres:18-alpine psql "$DATABASE_PUBLIC_URL" -tAc "select current_setting(\$\$server_version_num\$\$)::int / 10000"')
           echo "PG_IMAGE=postgres:${major}-alpine" >> "$GITHUB_ENV"
 
       - name: Dump production database
         run: |
-          railway run -e "$PROD_ENV" -s "$DB_SERVICE" bash -c \
+          railway run -p "$RAILWAY_PROJECT_ID" -e "$PROD_ENV" -s "$DB_SERVICE" bash -c \
             'docker run --rm "$PG_IMAGE" pg_dump -Fc "$DATABASE_PUBLIC_URL"' \
             > prod.dump
 
       - name: Restore into staging database
         run: |
-          railway link -p "$RAILWAY_PROJECT_ID" -e "$STAGE_ENV" -s "$DB_SERVICE"
-          railway run -e "$STAGE_ENV" -s "$DB_SERVICE" bash -c \
+          railway run -p "$RAILWAY_PROJECT_ID" -e "$STAGE_ENV" -s "$DB_SERVICE" bash -c \
             'docker run --rm -i "$PG_IMAGE" pg_restore --no-owner --no-privileges --clean --if-exists -d "$DATABASE_PUBLIC_URL"' \
             < prod.dump
 
