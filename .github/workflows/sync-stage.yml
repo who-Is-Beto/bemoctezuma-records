@@ -31,7 +31,9 @@ env:
   RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
   # Name of the web service that holds the PG_* connection vars (created from
   # the Procfile). Override via GitHub repo variable `APP_SERVICE` if renamed.
-  APP_SERVICE: ${{ vars.APP_SERVICE || 'web' }}
+  APP_SERVICE: ${{ vars.APP_SERVICE || 'bemoctezuma-records' }}
+  # Railway Postgres service (exposes DATABASE_PUBLIC_URL).
+  DB_SERVICE: ${{ vars.DB_SERVICE || 'Postgres' }}
   PROD_ENV: production
   STAGE_ENV: staging
 
@@ -47,11 +49,6 @@ jobs:
         && github.event.deployment.environment == 'production'
       )
     steps:
-      - name: Install postgres client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -63,21 +60,29 @@ jobs:
         run: npm install -g @railway/cli@5.2.0
 
       - name: Link project
-        run: railway link -p "$RAILWAY_PROJECT_ID" -e "$PROD_ENV" -s "$APP_SERVICE"
+        run: railway link -p "$RAILWAY_PROJECT_ID" -e "$PROD_ENV" -s "$DB_SERVICE"
+
+      # The app's PG_HOST is Railway's private network host, unreachable from
+      # a GitHub runner, so dump/restore go through the Postgres service's
+      # DATABASE_PUBLIC_URL (TCP proxy). pg_dump refuses servers newer than
+      # itself, so the client runs in a postgres image of the server's major.
+      - name: Detect server major version
+        run: |
+          major=$(railway run -e "$PROD_ENV" -s "$DB_SERVICE" bash -c \
+            'docker run --rm postgres:18-alpine psql "$DATABASE_PUBLIC_URL" -tAc "select current_setting(\$\$server_version_num\$\$)::int / 10000"')
+          echo "PG_IMAGE=postgres:${major}-alpine" >> "$GITHUB_ENV"
 
       - name: Dump production database
-        # `railway run` injects the service's PG_* vars locally, so pg_dump
-        # connects to prod's public TCP proxy without any secret in CI.
         run: |
-          railway run -e "$PROD_ENV" -s "$APP_SERVICE" bash -c \
-            'PGPASSWORD="$PG_PASSWORD" pg_dump -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -Fc -f -' \
+          railway run -e "$PROD_ENV" -s "$DB_SERVICE" bash -c \
+            'docker run --rm "$PG_IMAGE" pg_dump -Fc "$DATABASE_PUBLIC_URL"' \
             > prod.dump
 
       - name: Restore into staging database
         run: |
-          railway link -p "$RAILWAY_PROJECT_ID" -e "$STAGE_ENV" -s "$APP_SERVICE"
-          railway run -e "$STAGE_ENV" -s "$APP_SERVICE" bash -c \
-            'PGPASSWORD="$PG_PASSWORD" pg_restore --no-owner --no-privileges --clean --if-exists -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB"' \
+          railway link -p "$RAILWAY_PROJECT_ID" -e "$STAGE_ENV" -s "$DB_SERVICE"
+          railway run -e "$STAGE_ENV" -s "$DB_SERVICE" bash -c \
+            'docker run --rm -i "$PG_IMAGE" pg_restore --no-owner --no-privileges --clean --if-exists -d "$DATABASE_PUBLIC_URL"' \
             < prod.dump
 
   deploy-stage:
