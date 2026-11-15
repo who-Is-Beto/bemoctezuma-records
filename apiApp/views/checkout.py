@@ -14,6 +14,7 @@ from rest_framework.response import Response
 
 from .common import _require_email_verified, error_response
 from ..models import Bazar, Cart, Order
+from ..services.presales import fulfil_presale_session
 from ..services import (
     PREFERRED_COURIER,
     ShippingQuoteError,
@@ -263,6 +264,9 @@ def stripe_webhook(request):
 
     if event_type in ('checkout.session.completed', 'checkout.session.async_payment_succeeded'):
         session = event['data']['object']
+        if (session.get('metadata') or {}).get('kind') == 'presale':
+            fulfil_presale_session(session)
+            return HttpResponse(status=200)
         cart_code = _resolve_cart_code_from_session(session)
         session_id = session.get('id')
         print(f">>> checkout event | session_id={session_id} cart_code={cart_code}")

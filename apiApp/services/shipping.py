@@ -68,6 +68,31 @@ def record_unit_weight_grams(record):
     return DEFAULT_UNIT_WEIGHT_GRAMS
 
 
+def option_unit_weight_grams(option):
+    """Presale option weight: explicit weight_grams wins, else its format default."""
+    if option.weight_grams:
+        return option.weight_grams
+    slug = (option.category.slug if option.category else '') or ''
+    if 'cd' in slug:
+        return CD_UNIT_WEIGHT_GRAMS
+    if slug == '7':
+        return SEVEN_INCH_UNIT_WEIGHT_GRAMS
+    return DEFAULT_UNIT_WEIGHT_GRAMS
+
+
+def build_package_for_items(lines):
+    """Envíos Perros `package` for presale ``lines`` [(option, qty)] shipped in one box."""
+    units = sum(qty for _, qty in lines)
+    grams = PACKAGE_TARE_GRAMS + sum(option_unit_weight_grams(option) * qty for option, qty in lines)
+    return {
+        'type': 'Box',
+        'depth': BOX_DEPTH_CM,
+        'width': BOX_WIDTH_CM,
+        'height': min(BOX_HEIGHT_PER_UNIT_CM * max(units, 1), BOX_MAX_HEIGHT_CM),
+        'weight': max(round(grams / 1000, 2), MIN_PACKAGE_WEIGHT_KG),
+    }
+
+
 def build_package_from_cart(cart):
     """Build the Envíos Perros `package` object from the cart contents."""
     total_units = 0

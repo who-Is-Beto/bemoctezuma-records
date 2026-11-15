@@ -105,6 +105,8 @@ def test_metrics_combine_point_of_sale_and_paid_online_orders(admin_client, acti
          'net': '349.85', 'average_ticket': '120.00', 'cost': '0.00', 'profit': '349.85', 'units_without_cost': 5},
         {'channel': 'online', 'count': 1, 'units': 3, 'gross': '300.00', 'commission': '22.27',
          'net': '277.73', 'average_ticket': '300.00', 'cost': '0.00', 'profit': '277.73', 'units_without_cost': 3},
+        {'channel': 'presale', 'count': 0, 'units': 0, 'gross': '0.00', 'commission': '0.00',
+         'net': '0.00', 'average_ticket': '0.00', 'cost': '0.00', 'profit': '0.00', 'units_without_cost': 0},
     ]
     assert [(m['method'], m['gross'], m['commission']) for m in data['payment_methods']] == [
         ('stripe', '300.00', '22.27'), ('card', '250.00', '10.15'), ('cash', '70.00', '0.00'), ('unknown', '40.00', '0.00'),

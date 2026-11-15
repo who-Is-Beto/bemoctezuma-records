@@ -70,6 +70,13 @@ def test_html_to_plain_text_strips_tags_keeps_urls_and_accents():
     assert 'Á é í ó ú' in plain
 
 
+def test_html_to_plain_text_skips_head_styles():
+    plain = html_to_plain_text(
+        '<html><head><title>Moctezuma</title><style>.enter{opacity:0}</style></head><body><p>Hola</p></body></html>'
+    )
+    assert plain == 'Hola'
+
+
 @pytest.mark.django_db
 def test_html_to_plain_text_no_double_escape(order):
     send_order_created_email(order['order'])

@@ -1,0 +1,103 @@
+{% extends "emails/base.html" %}
+{% load i18n %}
+
+{% block preheader %}Preventa abierta: {{ presale.title }} de {{ presale.artist }}. Apártalo desde {{ min_deposit }}.{% endblock %}
+
+{% block content %}
+<div class="enter">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:14px;">
+        <tr>
+            <td style="font-size:12px;font-weight:700;letter-spacing:2px;color:#e85f3c;text-transform:uppercase;">Nueva preventa</td>
+            <td align="right" style="font-size:12px;font-weight:600;color:#57718a;">Aparta hasta el {% language "es" %}{{ presale.purchase_deadline|date:"j \d\e F" }}{% endlanguage %}</td>
+        </tr>
+    </table>
+    {% if cover_url %}
+    <a href="{{ presale_link }}"><img src="{{ cover_url }}" width="536" alt="{{ presale.title }} — {{ presale.artist }}" style="width:100%;max-width:536px;height:auto;border-radius:16px;display:block;border:0;"></a>
+    {% endif %}
+</div>
+
+<div class="enter enter-2">
+    <div style="margin-top:22px;font-size:12px;font-weight:700;letter-spacing:1.5px;color:#57718a;text-transform:uppercase;">{{ presale.artist }}</div>
+    <div class="h1" style="margin:6px 0 0;font-family:'Krona One','Helvetica Neue',Arial,sans-serif;font-size:26px;line-height:1.25;color:#14507a;">{{ presale.title }}</div>
+    {% if presale.description %}
+    <p style="margin:14px 0 0;color:#4f5b67;font-size:15px;line-height:1.65;">{{ presale.description|truncatewords:45 }}</p>
+    {% endif %}
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;">
+        <tr>
+            <td class="stack" width="33%" style="padding-right:8px;vertical-align:top;">
+                <div style="background:#fff6e1;border-radius:14px;padding:14px 16px;">
+                    <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#57718a;text-transform:uppercase;">Precio</div>
+                    <div style="margin-top:4px;font-size:18px;font-weight:700;color:#0f3f67;">{% if options|length > 1 %}Desde {% endif %}{{ price_from }}</div>
+                </div>
+            </td>
+            <td class="stack" width="33%" style="padding:0 4px;vertical-align:top;">
+                <div style="background:#fff6e1;border-radius:14px;padding:14px 16px;">
+                    <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#57718a;text-transform:uppercase;">Apártalo con</div>
+                    <div style="margin-top:4px;font-size:18px;font-weight:700;color:#0f3f67;">{{ min_deposit }}</div>
+                </div>
+            </td>
+            <td class="stack" width="33%" style="padding-left:8px;vertical-align:top;">
+                <div style="background:#fff6e1;border-radius:14px;padding:14px 16px;">
+                    <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#57718a;text-transform:uppercase;">Llega aprox.</div>
+                    <div style="margin-top:4px;font-size:18px;font-weight:700;color:#0f3f67;">{{ presale.estimated_arrival|default:"Por confirmar" }}</div>
+                </div>
+            </td>
+        </tr>
+    </table>
+    {% if max_discount %}
+    <div style="margin-top:12px;padding:12px 16px;border-radius:14px;background:#f4903c;color:#1b1f2a;font-size:14px;font-weight:700;">
+        Paga completo desde el inicio y ahorra {{ max_discount }}
+    </div>
+    {% endif %}
+</div>
+
+<div class="enter enter-3">
+    <div style="margin-top:28px;font-size:15px;font-weight:700;color:#0f3f67;">{% if versions|length > 1 %}Elige tu versión{% else %}La versión{% endif %}</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
+        {% for version in versions %}
+        <tr>
+            <td width="72" style="padding:10px 14px 10px 0;border-bottom:1px solid #f3e6c9;vertical-align:middle;">
+                {% if version.image_url %}
+                <img src="{{ version.image_url }}" width="64" height="64" alt="{{ version.name }}" style="display:block;width:64px;height:64px;object-fit:cover;border-radius:12px;border:0;{% if version.left <= 0 %}opacity:.4;{% endif %}">
+                {% else %}
+                <div style="width:64px;height:64px;border-radius:12px;background:#f3e6c9;"></div>
+                {% endif %}
+            </td>
+            <td style="padding:10px 0;border-bottom:1px solid #f3e6c9;vertical-align:middle;">
+                <div style="font-size:15px;font-weight:600;line-height:1.35;color:{% if version.left <= 0 %}#57718a{% else %}#0f3f67{% endif %};">{{ version.name }}</div>
+                <div style="margin-top:2px;font-size:13px;color:{% if version.left <= 0 %}#e85f3c{% else %}#57718a{% endif %};">{% if version.left <= 0 %}Agotado{% elif version.left == 1 %}Última copia{% else %}Quedan {{ version.left }}{% endif %}</div>
+            </td>
+            <td align="right" style="padding:10px 0 10px 12px;border-bottom:1px solid #f3e6c9;vertical-align:middle;white-space:nowrap;font-size:15px;font-weight:700;color:#0f3f67;">{{ version.price }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <div style="margin-top:26px;">
+        <a class="btn" href="{{ presale_link }}" style="display:inline-block;background:#f4903c;color:#1b1f2a;font-size:15px;font-weight:700;padding:15px 30px;border-radius:999px;text-decoration:none;">Apartar mi copia &rarr;</a>
+    </div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:30px;border-top:1px solid #f3e6c9;">
+        <tr><td colspan="2" style="padding:20px 0 6px;font-size:13px;font-weight:700;color:#0f3f67;">Cómo funciona</td></tr>
+        <tr>
+            <td width="34" style="padding:6px 0;vertical-align:top;"><div style="width:24px;height:24px;line-height:24px;border-radius:12px;background:#14507a;color:#ffffff;font-size:12px;font-weight:700;text-align:center;">1</div></td>
+            <td style="padding:6px 0;font-size:14px;line-height:1.5;color:#4f5b67;">Aparta tu copia con un anticipo.</td>
+        </tr>
+        <tr>
+            <td width="34" style="padding:6px 0;vertical-align:top;"><div style="width:24px;height:24px;line-height:24px;border-radius:12px;background:#14507a;color:#ffffff;font-size:12px;font-weight:700;text-align:center;">2</div></td>
+            <td style="padding:6px 0;font-size:14px;line-height:1.5;color:#4f5b67;">Liquida cuando quieras dentro de 120 días.</td>
+        </tr>
+        <tr>
+            <td width="34" style="padding:6px 0;vertical-align:top;"><div style="width:24px;height:24px;line-height:24px;border-radius:12px;background:#14507a;color:#ffffff;font-size:12px;font-weight:700;text-align:center;">3</div></td>
+            <td style="padding:6px 0;font-size:14px;line-height:1.5;color:#4f5b67;">Cuando llegue, recógelo en la tienda o te lo enviamos.</td>
+        </tr>
+    </table>
+</div>
+{% endblock %}
+
+{% block footer_note %}
+<p style="margin:0 0 12px;">
+    Recibes este correo porque pediste que te avisáramos de las preventas.
+    <a href="{{ unsubscribe_link }}" style="color:#57718a;">Ya no quiero recibir esto</a>.
+</p>
+{% endblock %}

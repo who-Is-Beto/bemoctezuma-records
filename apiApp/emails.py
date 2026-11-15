@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 _BLOCK_TAGS = frozenset(
     {"p", "div", "tr", "li", "br", "table", "ul", "ol", "hr", "h1", "h2", "h3", "h4", "h5", "h6"}
 )
+# Their text isn't part of the message (the CSS, the tab title).
+_SKIP_TAGS = frozenset({"head", "style", "title", "script"})
 
 
 def _template_path(template_name):
@@ -40,8 +42,11 @@ class _PlainTextParser(HTMLParser):
     def __init__(self):
         super().__init__()
         self._chunks = []
+        self._skipping = 0
 
     def handle_starttag(self, tag, attrs):
+        if tag in _SKIP_TAGS:
+            self._skipping += 1
         if tag in _BLOCK_TAGS:
             self._chunks.append("\n")
         if tag == "a":
@@ -50,11 +55,14 @@ class _PlainTextParser(HTMLParser):
                 self._chunks.append(f" ({href})")
 
     def handle_endtag(self, tag):
+        if tag in _SKIP_TAGS:
+            self._skipping = max(self._skipping - 1, 0)
         if tag in _BLOCK_TAGS:
             self._chunks.append("\n")
 
     def handle_data(self, data):
-        self._chunks.append(data)
+        if not self._skipping:
+            self._chunks.append(data)
 
     def result(self):
         lines = [line.strip() for line in "".join(self._chunks).splitlines()]
@@ -101,7 +109,8 @@ def _resolve_recipients(to):
     return resolved
 
 
-def send_email(*, template_name, context, subject, to, from_email=None, cc=None, bcc=None, reply_to=None):
+def send_email(*, template_name, context, subject, to, from_email=None, cc=None, bcc=None, reply_to=None,
+               headers=None, attachments=None):
     """Render and send a multipart (text + html) transactional email.
     Raises on failure so callers own their error policy."""
     html_body = render_email_html(template_name, context)
@@ -116,8 +125,11 @@ def send_email(*, template_name, context, subject, to, from_email=None, cc=None,
         cc=cc or [],
         bcc=bcc or [],
         reply_to=reply_to or [],
+        headers=headers or {},
     )
     email.attach_alternative(html_body, "text/html")
+    for attachment in attachments or []:
+        email.attach(attachment)
     try:
         email.send(fail_silently=False)
         logger.info("Email sent: %r to %s", subject, ", ".join(recipients))
