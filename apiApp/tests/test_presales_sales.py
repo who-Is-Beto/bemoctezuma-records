@@ -68,6 +68,14 @@ def test_method_split_proportional():
 
 
 @pytest.mark.django_db
+def test_store_card_payment_pays_card_commission():
+    order = make_order(item_price=D('800'))
+    svc.record_payment(order, D('300'), 'cash')
+    svc.record_payment(order, D('500'), 'card')
+    assert channel(sales_metrics(), 'presale')['commission'] == '20.30'  # 4.06% of 500
+
+
+@pytest.mark.django_db
 def test_presale_shipping_is_reported_apart():
     order = make_order(delivery='shipping', shipping_cost=D('150'))
     svc.record_payment(order, D('950'), 'cash', shipping_amount=D('150'))

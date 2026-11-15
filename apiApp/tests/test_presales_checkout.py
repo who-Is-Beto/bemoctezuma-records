@@ -180,6 +180,39 @@ def test_settle_includes_known_shipping(client, user):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize('amount,cents', [('100', 10000), ('250', 25000), ('500', 50000)])
+def test_settle_abono_charges_chosen_amount(client, user, amount, cents):
+    order = make_order(user=user)  # balance 500 after the cash below
+    svc.record_payment(order, Decimal('300'), 'cash')
+    with mock.patch('stripe.checkout.Session.create', return_value=FAKE_SESSION) as create:
+        res = client.post(f'/presales/orders/{order.code}/settle/', {'amount': amount}, format='json')
+    assert res.status_code == 200, res.json()
+    assert [i['price_data']['unit_amount'] for i in create.call_args.kwargs['line_items']] == [cents]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('amount', ['50', '120', '450.50', '550'])
+def test_settle_abono_rejects_bad_amounts(client, user, amount):
+    order = make_order(user=user)
+    svc.record_payment(order, Decimal('300'), 'cash')
+    res = client.post(f'/presales/orders/{order.code}/settle/', {'amount': amount}, format='json')
+    assert res.status_code == 400 and res.json()['error']['code'] == 'invalid_partial'
+
+
+@pytest.mark.django_db
+def test_settle_abono_leaves_shipping_for_last(client, user):
+    order = make_order(user=user, delivery='shipping', shipping_cost=Decimal('150'))
+    svc.record_payment(order, Decimal('300'), 'cash')  # 500 records + 150 shipping due
+    with mock.patch('stripe.checkout.Session.create', return_value=FAKE_SESSION) as create:
+        client.post(f'/presales/orders/{order.code}/settle/', {'amount': '200'}, format='json')
+    kwargs = create.call_args.kwargs
+    assert [i['price_data']['unit_amount'] for i in kwargs['line_items']] == [20000]
+    assert kwargs['metadata']['shipping'] == '0.00'
+    assert client.post(f'/presales/orders/{order.code}/settle/', {'amount': '600'},
+                       format='json').json()['error']['code'] == 'invalid_partial'
+
+
+@pytest.mark.django_db
 def test_settle_nothing_due(client, user):
     order = make_order(user=user)
     svc.record_payment(order, Decimal('800'), 'cash')
