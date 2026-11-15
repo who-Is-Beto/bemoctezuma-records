@@ -9,6 +9,7 @@ from apiApp.models import Owner
 from apiApp.services import presales as svc
 from apiApp.services.sales import estimated_stripe_fee, sales_csv_rows, sales_metrics
 from apiApp.tests.presale_factories import make_option, make_order
+from apiApp.tests.test_sales_metrics import admin_client  # noqa: F401
 
 D = Decimal
 
@@ -136,3 +137,22 @@ def test_owner_emails_go_per_owner():
     assert sent == ['ana-owner@example.com', 'luis-owner@example.com']
     order.refresh_from_db()
     assert order.owner_notified
+
+
+@pytest.mark.django_db
+def test_registro_lists_paid_presales_and_counts_them(admin_client):
+    ana = Owner.objects.create(name='Ana', email='ana-r@example.com')
+    red = make_option(name='Rojo', cost_price=D('300'), owner=ana)
+    black = make_option(red.presale, name='Negro', price=D('600'))
+    order = make_order(lines=[(red, 2), (black, 1)])
+    svc.record_payment(order, D('2200'), 'cash')
+    make_order(red)  # deposit only: not a sale yet
+    data = admin_client.get('/sales/').json()
+    assert [p['code'] for p in data['presales']] == [order.code]
+    presale = data['presales'][0]
+    assert [(i['title'], i['quantity'], i['price']) for i in presale['items']] == [
+        ('Kind of Blue · Rojo', 2, '800.00'), ('Kind of Blue · Negro', 1, '600.00')]
+    assert presale['subtotal'] == '2200.00' and presale['method_label'] == 'Efectivo'
+    assert data['totals']['subtotal'] == '2200.00' and data['totals']['cost'] == '600.00'
+    mine = admin_client.get('/sales/', {'owner': ana.id}).json()
+    assert mine['totals']['subtotal'] == '1600.00'

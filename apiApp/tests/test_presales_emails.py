@@ -128,3 +128,12 @@ def test_reminders_wait_for_all_lines():
                deadline_override=timezone.localdate() + timedelta(days=7))
     call_command('presale_reminders')
     assert mail.outbox == []
+
+
+@pytest.mark.django_db
+def test_shipping_order_email_has_no_qr():
+    order = make_order(delivery='shipping')
+    send_presale_email(order, 'reserved')
+    message = mail.outbox[-1]
+    assert 'cid:presale-qr' not in message.alternatives[0][0]
+    assert not message.attachments

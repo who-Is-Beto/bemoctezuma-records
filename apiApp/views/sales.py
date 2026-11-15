@@ -18,7 +18,8 @@ from ..serilizers import (
     SalesFilterSerializer,
 )
 from ..services import (
-    SALES_CSV_HEADER, commission_rate_for, previous_period, notify_sale_owners, sales_csv_rows, sales_metrics, split_commission,
+    SALES_CSV_HEADER, commission_rate_for, previous_period, notify_sale_owners, presale_history, sales_csv_rows,
+    sales_metrics, split_commission,
     take_stock,
 )
 
@@ -161,8 +162,14 @@ def sales_list(request):
     subtotal = sum((item.price * item.quantity for item in items), Decimal('0.00'))
     commission = sum((item.commission_amount for item in items), Decimal('0.00'))
     cost = sum((item.cost_price * item.quantity for item in items), Decimal('0.00'))
+    # Paid presales count as sales too (on the day they got fully paid).
+    presales = presale_history(date_from, date_to, owner)
+    subtotal += sum((Decimal(p['subtotal']) for p in presales), Decimal('0.00'))
+    commission += sum((Decimal(p['commission']) for p in presales), Decimal('0.00'))
+    cost += sum((Decimal(p['cost']) for p in presales), Decimal('0.00'))
     return Response({
         'results': SaleSerializer(sales, many=True).data,
+        'presales': presales,
         'totals': {
             'subtotal': str(subtotal),
             'commission': str(commission),
@@ -170,7 +177,8 @@ def sales_list(request):
             # Profit = net - cost saved at sale time; lines with cost 0 had none recorded.
             'cost': str(cost),
             'profit': str(subtotal - commission - cost),
-            'units_without_cost': sum(item.quantity for item in items if not item.cost_price),
+            'units_without_cost': sum(item.quantity for item in items if not item.cost_price)
+            + sum(p['units_without_cost'] for p in presales),
         },
     })
 

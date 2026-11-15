@@ -341,7 +341,8 @@ def _presale_email_context(order, kind):
         "delivery_label": order.get_delivery_display(),
         "tracking": order.shipping_link,
         "orders_link": _frontend("/mis-ordenes"),
-        "show_code": kind not in ('delivered',),
+        # The QR is shown at the store counter: shipping orders never need it.
+        "show_code": kind != 'delivered' and order.delivery == 'pickup',
     }
 
 

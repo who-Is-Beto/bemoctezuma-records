@@ -484,6 +484,62 @@ def sales_csv_rows(date_from=None, date_to=None, owner_id=None):
     return [values for _, values in rows]
 
 
+def _image_url(image):
+    try:
+        return image.url if image else None
+    except ValueError:  # the file field has no file
+        return None
+
+
+def presale_history(date_from=None, date_to=None, owner_id=None):
+    """Ventas → Registro rows for paid presale orders (shaped like tickets), newest first.
+
+    With ``owner_id`` only orders holding that owner's versions are listed, and
+    each row's money counts only those lines (as tickets do).
+    """
+    rows = []
+    for order in _paid_presales(date_from, date_to):
+        figures = presale_figures(order)
+        lines = [line for line in figures['lines'] if not owner_id or line.owner_id == owner_id]
+        if not lines:
+            continue
+        gross_all = figures['gross']
+        subtotal = sum((line.price * line.quantity for line in lines), ZERO)
+        commission = _cents(figures['commission'] * subtotal / gross_all) if gross_all else ZERO
+        cost = sum((line.cost_price * line.quantity for line in lines), ZERO)
+        items = []
+        for index, line in enumerate(figures['lines']):
+            line_gross = line.price * line.quantity
+            share = _cents(figures['commission'] * line_gross / gross_all) if gross_all else ZERO
+            option = line.option
+            items.append({
+                'id': f'{order.code}-{index}',
+                'title': f'{option.presale.title} · {option.name}',
+                'artist': option.presale.artist,
+                'cover_image_url': _image_url(option.image or option.presale.cover),
+                'owner': {'id': line.owner.id, 'name': line.owner.name, 'email': line.owner.email} if line.owner else None,
+                'quantity': line.quantity,
+                'price': str(_cents(line.price)),
+                'cost_price': str(_cents(line.cost_price)),
+                'profit': str(_cents(line_gross - share - line.cost_price * line.quantity)),
+            })
+        rows.append({
+            'code': order.code,
+            'paid_at': order.paid_at.isoformat(),
+            'buyer': order.buyer_name,
+            'method_label': figures['method_label'] or 'Sin registrar',
+            'subtotal': str(_cents(subtotal)),
+            'commission': str(commission),
+            'final_sale_price': str(_cents(subtotal - commission)),
+            'cost': str(_cents(cost)),
+            'profit': str(_cents(subtotal - commission - cost)),
+            'units_without_cost': sum(line.quantity for line in lines if not line.cost_price),
+            'items': items,
+        })
+    rows.sort(key=lambda row: row['paid_at'], reverse=True)
+    return rows
+
+
 def notify_presale_owner(order):
     """Consignor emails when a presale order is fully paid: one per owner, listing
     their versions in it (once per order). Never raises."""
