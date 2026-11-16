@@ -27,8 +27,25 @@ logger = logging.getLogger(__name__)
 TAB = 'apiApp.tab_presales'
 ADD_PRESALE = 'apiApp.add_presale'
 CHANGE_PRESALE = 'apiApp.change_presale'
+PUBLISH = 'apiApp.publish_presale'
+DELETE_PRESALE = 'apiApp.delete_presale'
+ARRIVALS = 'apiApp.change_presaleoption'
 PAYMENTS = 'apiApp.add_presalepayment'
+VOID = 'apiApp.change_presalepayment'
 ORDERS = 'apiApp.change_presaleorder'
+# Administración → Pedidos also lists paid presale shipments and can ship them.
+ORDERS_TAB = 'apiApp.tab_manage_orders'
+CHANGE_ORDER = 'apiApp.change_order'
+
+
+def _require_any(request, *perms):
+    """Like _require_admin, but any one of ``perms`` is enough."""
+    denied = None
+    for perm in perms:
+        denied = _require_admin(request, perm)
+        if denied is None:
+            return None
+    return denied
 
 # Money fields an option keeps once someone bought it (existing orders snapshot
 # their own price, but the presale page would contradict them).
@@ -113,7 +130,8 @@ def admin_presales(request):
 @api_view(['GET', 'PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def admin_presale_detail(request, presale_id):
-    denied = _require_admin(request, TAB if request.method == 'GET' else CHANGE_PRESALE)
+    perm = {'GET': TAB, 'DELETE': DELETE_PRESALE}.get(request.method, CHANGE_PRESALE)
+    denied = _require_admin(request, perm)
     if denied:
         return denied
     presale = PreSale.objects.filter(pk=presale_id).first()
@@ -200,7 +218,7 @@ def admin_presale_option(request, option_id):
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def admin_presale_publish(request, presale_id):
-    denied = _require_admin(request, CHANGE_PRESALE)
+    denied = _require_admin(request, PUBLISH)
     if denied:
         return denied
     presale = PreSale.objects.filter(pk=presale_id).first()
@@ -217,6 +235,31 @@ def admin_presale_publish(request, presale_id):
     return Response({'status': presale.status, 'recipients': recipients})
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_presales_publish_many(request):
+    """Publish several presales at once: they show up together and subscribers
+    get one email listing all of them."""
+    denied = _require_admin(request, PUBLISH)
+    if denied:
+        return denied
+    ids = request.data.get('ids')
+    if not isinstance(ids, list) or not ids or not all(str(i).isdigit() for i in ids):
+        return error_response("Elige las preventas a publicar.", status_code=400, code="invalid_ids")
+    presales = list(PreSale.objects.filter(pk__in=[int(i) for i in ids]).prefetch_related('options'))
+    if len(presales) != len(set(int(i) for i in ids)):
+        return _not_found()
+    empty = [p.title for p in presales if not any(o.is_active for o in p.options.all())]
+    if empty:
+        return error_response(f"Agrega al menos una opción activa a: {', '.join(empty)}.", status_code=400,
+                              code="options_required")
+    with transaction.atomic():
+        PreSale.objects.filter(pk__in=[p.pk for p in presales]).update(status='published')
+    from ..services.emailing import announce_presales
+    recipients = announce_presales(presales) if request.data.get('announce') is True else 0
+    return Response({'published': len(presales), 'recipients': recipients})
+
+
 def _arrive(request, options, copies=None):
     # Count first, then hand out once: an order with several versions gets one email.
     for option in options:
@@ -227,7 +270,7 @@ def _arrive(request, options, copies=None):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def admin_presale_option_arrived(request, option_id):
-    denied = _require_admin(request, CHANGE_PRESALE)
+    denied = _require_admin(request, ARRIVALS)
     if denied:
         return denied
     option = PreSaleOption.objects.select_related('presale').filter(pk=option_id).first()
@@ -246,7 +289,7 @@ def admin_presale_option_arrived(request, option_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def admin_presale_arrived(request, presale_id):
-    denied = _require_admin(request, CHANGE_PRESALE)
+    denied = _require_admin(request, ARRIVALS)
     if denied:
         return denied
     presale = PreSale.objects.filter(pk=presale_id).first()
@@ -451,7 +494,7 @@ def admin_presale_add_payment(request, order_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def admin_presale_void_payment(request, payment_id):
-    denied = _require_admin(request, PAYMENTS)
+    denied = _require_admin(request, VOID)
     if denied:
         return denied
     payment = PreSalePayment.objects.select_related('order').filter(pk=payment_id).first()
@@ -464,11 +507,11 @@ def admin_presale_void_payment(request, payment_id):
     return _order_response(request, payment.order)
 
 
-def _order_action(action):
+def _order_action(action, perms=(ORDERS,)):
     @api_view(['POST'])
     @permission_classes([IsAuthenticated])
     def view(request, order_id):
-        denied = _require_admin(request, ORDERS)
+        denied = _require_any(request, *perms)
         if denied:
             return denied
         order = _get_order(order_id)
@@ -501,7 +544,20 @@ def _ship(request, order):
 
 
 admin_presale_deliver = _order_action(_deliver)
-admin_presale_ship = _order_action(_ship)
+admin_presale_ship = _order_action(_ship, perms=(ORDERS, CHANGE_ORDER))
+admin_presale_to_pickup = _order_action(
+    lambda r, o: svc.switch_to_pickup(o, by=r.user, shipping_refunded=r.data.get('shipping_refunded') is True))
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_presale_shipments(request):
+    """Pedidos: presale orders going by mail once the records are paid (to ship, then shipped)."""
+    denied = _require_any(request, ORDERS_TAB, TAB)
+    if denied:
+        return denied
+    orders = _orders_qs().filter(delivery='shipping', paid_at__isnull=False, status__in=('pagado', 'enviado'))
+    return Response([presale_admin_order_payload(o, request) for o in orders])
 admin_presale_cancel = _order_action(lambda r, o: svc.cancel(o, by=r.user, reason=r.data.get('reason')))
 admin_presale_expire = _order_action(lambda r, o: svc.expire(o, by=r.user))
 admin_presale_reopen = _order_action(lambda r, o: svc.reopen(o, by=r.user))

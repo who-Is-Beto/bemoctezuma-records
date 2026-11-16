@@ -1,0 +1,48 @@
+{% extends "emails/base.html" %}
+{% load i18n %}
+
+{% block preheader %}{{ count }} preventas abiertas: {% for e in entries %}{{ e.presale.title }}{% if not forloop.last %}, {% endif %}{% endfor %}.{% endblock %}
+
+{% block content %}
+<div class="enter">
+    <div style="font-size:12px;font-weight:700;letter-spacing:2px;color:#e85f3c;text-transform:uppercase;">Nuevas preventas</div>
+    <div class="h1" style="margin:8px 0 0;font-family:'Krona One','Helvetica Neue',Arial,sans-serif;font-size:26px;line-height:1.25;color:#14507a;">Abrimos {{ count }} preventas</div>
+    <p style="margin:12px 0 0;color:#4f5b67;font-size:15px;line-height:1.65;">Aparta con un anticipo y liquida dentro de 120 días. Puedes juntar varias en un solo pedido: una caja, un pago.</p>
+</div>
+
+{% for e in entries %}
+<div class="enter enter-2">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;border-radius:18px;background:#fff6e1;">
+        <tr>
+            {% if e.cover_url %}
+            <td class="stack" width="150" style="padding:16px 0 16px 16px;vertical-align:top;">
+                <a href="{{ e.presale_link }}"><img src="{{ e.cover_url }}" width="134" height="134" alt="{{ e.presale.title }}" style="display:block;width:134px;height:134px;object-fit:cover;border-radius:14px;border:0;"></a>
+            </td>
+            {% endif %}
+            <td style="padding:16px;vertical-align:top;">
+                <div style="font-size:12px;font-weight:700;letter-spacing:1.5px;color:#57718a;text-transform:uppercase;">{{ e.presale.artist }}</div>
+                <div style="margin-top:4px;font-size:19px;font-weight:700;line-height:1.3;color:#0f3f67;">{{ e.presale.title }}</div>
+                <div style="margin-top:6px;font-size:14px;line-height:1.5;color:#4f5b67;">
+                    {% if e.options|length > 1 %}Desde {% endif %}<strong style="color:#0f3f67;">{{ e.price_from }}</strong> · apártalo con {{ e.min_deposit }}<br>
+                    Llega aprox. {{ e.presale.estimated_arrival|default:"por confirmar" }} · aparta hasta el {% language "es" %}{{ e.presale.purchase_deadline|date:"j \d\e F" }}{% endlanguage %}
+                </div>
+                <div style="margin-top:6px;font-size:13px;line-height:1.5;color:#57718a;">
+                    {% for v in e.versions %}{{ v.name }}{% if v.left <= 0 %} (agotado){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
+                </div>
+                {% if e.max_discount %}<div style="margin-top:8px;font-size:13px;font-weight:700;color:#e85f3c;">Paga completo y ahorra {{ e.max_discount }}</div>{% endif %}
+                <div style="margin-top:12px;">
+                    <a class="btn" href="{{ e.presale_link }}" style="display:inline-block;background:#f4903c;color:#1b1f2a;font-size:14px;font-weight:700;padding:11px 22px;border-radius:999px;text-decoration:none;">Apartar &rarr;</a>
+                </div>
+            </td>
+        </tr>
+    </table>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block footer_note %}
+<p style="margin:0 0 12px;">
+    Recibes este correo porque pediste que te avisáramos de las preventas.
+    <a href="{{ unsubscribe_link }}" style="color:#57718a;">Ya no quiero recibir esto</a>.
+</p>
+{% endblock %}

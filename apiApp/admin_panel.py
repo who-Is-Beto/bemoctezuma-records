@@ -37,13 +37,17 @@ TABS = [
         ('delete_bazar', 'Eliminar bazares'),
     ]),
     ('manage-orders', 'Pedidos', 'tab_manage_orders', [
-        ('change_order', 'Actualizar estado y guía de envío'),
+        ('change_order', 'Actualizar estado y guía de envío (también de preventas por enviar)'),
     ]),
     ('presales', 'Preventas', 'tab_presales', [
         ('add_presale', 'Crear preventas'),
-        ('change_presale', 'Editar, publicar y marcar llegadas'),
+        ('change_presale', 'Editar y cerrar preventas (versiones, copias, límite por persona)'),
+        ('publish_presale', 'Publicar preventas y avisar por correo a los suscriptores'),
+        ('delete_presale', 'Eliminar preventas sin compradores'),
+        ('change_presaleoption', 'Registrar llegadas de copias a la tienda'),
         ('add_presalepayment', 'Registrar pagos y preventas de clientes'),
-        ('change_presaleorder', 'Entregar, cancelar y cambiar estados'),
+        ('change_presalepayment', 'Anular pagos (los de Stripe se reembolsan)'),
+        ('change_presaleorder', 'Entregar, enviar, cancelar, cambiar plazos y pasar a recoger en tienda'),
     ]),
     # Read-only history; selling itself is change_record in Punto de venta.
     ('sales', 'Ventas', 'tab_sales', []),
