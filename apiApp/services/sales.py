@@ -136,7 +136,8 @@ def presale_figures(order):
     commission = ZERO
     shipping = ZERO
     for payment in payments:
-        item_paid[payment.method] = item_paid.get(payment.method, ZERO) + payment.amount - payment.shipping_amount
+        if payment.amount != payment.shipping_amount:  # a shipping-only line (refund) pays no record
+            item_paid[payment.method] = item_paid.get(payment.method, ZERO) + payment.amount - payment.shipping_amount
         shipping += payment.shipping_amount
         if payment.method == 'stripe':
             commission += estimated_stripe_fee(payment.amount)

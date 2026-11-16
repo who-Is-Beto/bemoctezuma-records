@@ -204,18 +204,17 @@ def _presale_cover(presale):
     return _image_url(presale.cover)
 
 
-def _send_announcements(presale_id, emails):
-    from ..models import PreSale
+def _announcement_entry(presale):
     from .presales import copies_left
-    presale = PreSale.objects.prefetch_related('options').get(pk=presale_id)
     options = [o for o in presale.options.all() if o.is_active]
     cover_url = _presale_cover(presale)
     max_discount = max((o.full_payment_discount for o in options), default=0)
-    context = {
+    return {
         "presale": presale,
         "options": options,
         "versions": [
-            {"name": o.name, "price": _money_str(o.price), "left": copies_left(o), "image_url": _image_url(o.image) or cover_url}
+            {"name": o.name, "description": o.description, "items_inside": o.items_inside,
+             "price": _money_str(o.price), "left": copies_left(o), "image_url": _image_url(o.image) or cover_url}
             for o in options
         ],
         "price_from": _money_str(min((o.price for o in options), default=0)),
@@ -224,39 +223,60 @@ def _send_announcements(presale_id, emails):
         "cover_url": cover_url,
         "presale_link": _frontend(f"/preventas/{presale.slug}"),
     }
+
+
+def _send_announcements(presale_ids, emails):
+    """One email per subscriber, whether one presale opened or several at once."""
+    from ..models import PreSale
+    presales = list(PreSale.objects.prefetch_related('options').filter(pk__in=presale_ids)
+                    .order_by('purchase_deadline', 'pk'))
+    entries = [_announcement_entry(p) for p in presales]
+    if len(entries) == 1:
+        template, context = "presale_announcement", entries[0]
+        subject = f"Nueva preventa: {presales[0].title} — {presales[0].artist}"
+    else:
+        template, context = "presale_announcement_digest", {"entries": entries, "count": len(entries)}
+        subject = f"{len(entries)} preventas nuevas: " + ", ".join(p.title for p in presales)
     sent = 0
     for email in emails:
         unsubscribe = presale_unsubscribe_link(email)
         try:
             send_email(
-                template_name="presale_announcement",
+                template_name=template,
                 context={**context, "unsubscribe_link": unsubscribe},
-                subject=f"Nueva preventa: {presale.title} — {presale.artist}",
+                subject=subject[:200],
                 to=[email],
                 headers={"List-Unsubscribe": f"<{unsubscribe}>"},
             )
             sent += 1
         except Exception:
             logger.exception("Presale announcement to %s failed", email)
-    logger.info("Presale %s announced to %s/%s subscribers", presale_id, sent, len(emails))
+    logger.info("Presales %s announced to %s/%s subscribers", presale_ids, sent, len(emails))
 
 
-def announce_presale(presale):
-    """Email every confirmed subscriber once per presale. Returns how many will get it.
+def announce_presales(presales):
+    """Email every confirmed subscriber once about ``presales`` (one email for all of
+    them). Returns how many will get it.
 
     Runs in a background thread (no task queue here) so publishing doesn't wait
-    on one email per subscriber. ``announced_at`` is claimed first and atomically,
-    so a double click can't announce twice.
+    on one email per subscriber. Each ``announced_at`` is claimed first and
+    atomically, so a double click can't announce twice; already announced
+    presales are left out.
     """
     from django.utils import timezone
     from ..models import PreSale
-    claimed = PreSale.objects.filter(pk=presale.pk, announced_at__isnull=True).update(announced_at=timezone.now())
+    claimed = [p.pk for p in presales
+               if PreSale.objects.filter(pk=p.pk, announced_at__isnull=True).update(announced_at=timezone.now())]
     if not claimed:
         return 0
     emails = list(_subscribers().values_list('email', flat=True))
     if emails:
-        threading.Thread(target=_send_announcements, args=(presale.pk, emails), daemon=True).start()
+        threading.Thread(target=_send_announcements, args=(claimed, emails), daemon=True).start()
     return len(emails)
+
+
+def announce_presale(presale):
+    return announce_presales([presale])
 
 
 PRESALE_EMAILS = {
@@ -309,7 +329,12 @@ def _presale_email_context(order, kind):
     if kind == 'arrived' and missing:
         intro = f"Llegó: {label(i for i in items if i.arrived_at)}. Falta: {label(missing)}."
     elif kind == 'arrived':
-        if balance > 0:
+        if balance > 0 and order.delivery == 'shipping' and order.shipping_cost is not None:
+            intro = (f"Liquida {_money_str(balance)} (envío de {_money_str(order.shipping_cost)} incluido) "
+                     "y te lo mandamos.")
+        elif balance > 0 and order.delivery == 'shipping':
+            intro = f"Liquida {_money_str(balance)} más el envío y te lo mandamos."
+        elif balance > 0:
             intro = f"Liquida {_money_str(balance)} y es tuyo."
         elif order.delivery == 'shipping':
             intro = "Ya está pagado: lo preparamos para enviártelo."
@@ -319,6 +344,7 @@ def _presale_email_context(order, kind):
         intro = f"Te faltan {_money_str(balance)}. Tienes hasta el {svc.deadline(order).strftime('%d/%m/%Y')} para liquidar o pierdes tu apartado."
     total_due = svc.total_due(order)
     paid = svc.paid_amount(order)
+    shipping_cost = order.shipping_cost if order.delivery == 'shipping' else None
     return {
         "subject": f"{subject} · {order.code}",
         "headline": headline,
@@ -333,6 +359,13 @@ def _presale_email_context(order, kind):
             for i in items
         ],
         "cover_url": _presale_cover(presale),
+        # What the buyer saw when buying: records, shipping (or its estimate), total.
+        "records_total": _money_str(order.item_price),
+        "discount": order.discount_applied > 0 and _money_str(order.discount_applied),
+        "is_shipping": order.delivery == 'shipping',
+        "shipping": shipping_cost is not None and _money_str(shipping_cost),
+        "shipping_estimate": order.shipping_estimate is not None and _money_str(order.shipping_estimate),
+        "shipping_due": _money_str(svc.shipping_due(order)),
         "total": _money_str(total_due),
         "paid": _money_str(paid),
         "paid_percent": min(int(paid * 100 / total_due), 100) if total_due > 0 else 100,

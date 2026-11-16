@@ -57,6 +57,7 @@ class PresaleError(Exception):
         'paid_not_enough': 'Falta pagar para entregar esto.',
         'refund_failed': 'Stripe no pudo hacer el reembolso; el pago sigue vigente.',
         'invalid_partial': 'Abona desde $100 en múltiplos de $50, o liquida lo que falta.',
+        'refund_shipping_required': 'Devuelve el envío pagado para entregar en tienda.',
     }
 
     def __init__(self, code, message=None):
@@ -549,6 +550,35 @@ def mark_shipped(order, *, tracking, by):
     order.delivered_by = by
     order.save(update_fields=['status', 'shipping_link', 'delivered_at', 'delivered_by', 'updated_at'])
     _log(order, 'status', f'enviado · {order.shipping_link}', by)
+
+
+def switch_to_pickup(order, *, by, shipping_refunded=False):
+    """A shipping buyer came to the store instead: the order becomes a pickup.
+
+    Shipping paid already is given back in cash at the counter (``shipping_refunded``
+    confirms it): a negative ledger line takes it out of the shipping collected, so
+    Ventas keeps the record's gross and shows no shipping for this order.
+    """
+    if order.delivery != 'shipping':
+        raise PresaleError('not_shipping')
+    if order.status in LOCKED_STATUSES or order.status == 'pending_payment':
+        raise PresaleError('invalid_status')
+    refund = shipping_paid(order)
+    if refund > 0 and not shipping_refunded:
+        raise PresaleError('refund_shipping_required',
+                           f'Devuélvele ${refund:,.2f} del envío y confírmalo para entregar en tienda.')
+    with transaction.atomic():
+        if refund > 0:
+            PreSalePayment.objects.create(order=order, amount=-refund, method='cash', shipping_amount=-refund,
+                                          note='Envío devuelto: recogió en tienda', registered_by=by)
+            _log(order, 'payment', f'-${refund} · envío devuelto en efectivo', by)
+        order.delivery = 'pickup'
+        order.shipping_cost = None
+        order.shipping_estimate = None
+        order.save(update_fields=['delivery', 'shipping_cost', 'shipping_estimate', 'updated_at'])
+        _log(order, 'status', 'Cambió a recoger en tienda', by)
+        refresh_status(order, by)
+    return order
 
 
 def cancel(order, *, by, reason):

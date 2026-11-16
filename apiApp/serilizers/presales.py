@@ -33,7 +33,7 @@ class PreSaleOptionPublicSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PreSaleOption
-        fields = ['id', 'name', 'image', 'format', 'price', 'min_deposit', 'full_payment_discount',
+        fields = ['id', 'name', 'description', 'items_inside', 'image', 'format', 'price', 'min_deposit', 'full_payment_discount',
                   'copies', 'copies_left', 'arrived', 'is_active', 'max_per_buyer', 'bought']
 
     def get_image(self, obj):
@@ -172,7 +172,7 @@ class PreSaleOptionAdminSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PreSaleOption
-        fields = ['id', 'name', 'image', 'image_url', 'category', 'weight_grams', 'price', 'min_deposit',
+        fields = ['id', 'name', 'description', 'items_inside', 'image', 'image_url', 'category', 'weight_grams', 'price', 'min_deposit',
                   'full_payment_discount', 'cost_price', 'owner', 'copies', 'max_per_buyer', 'is_active',
                   'position', 'arrived_at', 'arrived_copies', 'copies_left', 'taken', 'has_orders']
         read_only_fields = ['arrived_at', 'arrived_copies']
@@ -270,6 +270,8 @@ def presale_admin_order_payload(order, request=None):
         'source_label': order.get_source_display(),
         'shipping_details': order.shipping_details,
         'shipping_courier': order.shipping_courier,
+        # Shipping already charged: handed back if the buyer picks up at the store instead.
+        'shipping_paid': money(svc.shipping_paid(order)),
         'deadline_override': order.deadline_override.isoformat() if order.deadline_override else None,
         'is_expirable': svc.is_expirable(order),
         'oversold': order.oversold,

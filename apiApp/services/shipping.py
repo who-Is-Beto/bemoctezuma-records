@@ -69,15 +69,18 @@ def record_unit_weight_grams(record):
 
 
 def option_unit_weight_grams(option):
-    """Presale option weight: explicit weight_grams wins, else its format default."""
+    """Presale option weight: explicit weight_grams (the whole package) wins, else
+    its format default per piece × items_inside, like a record."""
     if option.weight_grams:
         return option.weight_grams
     slug = (option.category.slug if option.category else '') or ''
     if 'cd' in slug:
-        return CD_UNIT_WEIGHT_GRAMS
-    if slug == '7':
-        return SEVEN_INCH_UNIT_WEIGHT_GRAMS
-    return DEFAULT_UNIT_WEIGHT_GRAMS
+        unit = CD_UNIT_WEIGHT_GRAMS
+    elif slug == '7':
+        unit = SEVEN_INCH_UNIT_WEIGHT_GRAMS
+    else:
+        unit = DEFAULT_UNIT_WEIGHT_GRAMS
+    return unit * (getattr(option, 'items_inside', 1) or 1)
 
 
 def build_package_for_items(lines):

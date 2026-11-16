@@ -39,7 +39,15 @@
 </div>
 
 <div class="enter enter-2">
-    <div style="margin-top:22px;padding:18px 20px;border-radius:16px;background:#fff6e1;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;font-size:14px;color:#4f5b67;">
+        <tr><td style="padding:4px 0;">Discos{% if discount %} (con {{ discount }} de descuento){% endif %}</td><td align="right" style="padding:4px 0;font-weight:600;color:#0f3f67;">{{ records_total }}</td></tr>
+        {% if is_shipping %}
+        <tr><td style="padding:4px 0;">Envío</td><td align="right" style="padding:4px 0;font-weight:600;color:#0f3f67;">{% if shipping %}{{ shipping }}{% elif shipping_estimate %}&asymp; {{ shipping_estimate }} (se confirma cuando llegue){% else %}Por cotizar{% endif %}</td></tr>
+        {% endif %}
+        <tr><td style="padding:6px 0 0;border-top:1px solid #f3e6c9;font-weight:700;color:#0f3f67;">Total</td><td align="right" style="padding:6px 0 0;border-top:1px solid #f3e6c9;font-weight:700;color:#0f3f67;">{{ total }}{% if shipping_pending %} + envío{% endif %}</td></tr>
+    </table>
+
+    <div style="margin-top:14px;padding:18px 20px;border-radius:16px;background:#fff6e1;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             <tr>
                 <td style="font-size:13px;font-weight:600;color:#57718a;">Pagado {{ paid }} de {{ total }}{% if shipping_pending %} + envío{% endif %}</td>
@@ -59,7 +67,7 @@
 
     {% if owes %}
     <p style="margin:14px 0 0;color:#4f5b67;font-size:14px;line-height:1.6;">
-        Tienes hasta el <strong style="color:#0f3f67;">{{ deadline }}</strong> para liquidar{% if not arrived %} (o 15 días después de que llegue el disco, lo que pase después){% endif %}. Si no, pierdes tu apartado.
+        Tienes hasta el <strong style="color:#0f3f67;">{{ deadline }}</strong> para liquidar (120 días desde tu apartado). Si no, pierdes tu apartado.
     </p>
     {% endif %}
     {% if tracking %}

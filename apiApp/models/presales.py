@@ -45,6 +45,8 @@ class PreSale(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        # Publishing emails every subscriber, so it's granted apart from editing.
+        permissions = [('publish_presale', 'Publicar preventas y avisar a suscriptores')]
 
     def __str__(self):
         return f"{self.title} — {self.artist}"
@@ -67,6 +69,10 @@ class PreSaleOption(models.Model):
     """One version a buyer can pick: "Vinilo rojo", "CD", "Edición 2LP"."""
     presale = models.ForeignKey(PreSale, on_delete=models.CASCADE, related_name='options')
     name = models.CharField(max_length=120)
+    # What the buyer gets: "2 LP + póster", shown under the name.
+    description = models.CharField(max_length=200, blank=True, default='')
+    # Pieces in the package (records, CDs, extras), like Record.items_inside.
+    items_inside = models.PositiveSmallIntegerField(default=1)
     image = models.ImageField(upload_to='presales/%Y/%m/', blank=True, null=True)
     # Format: drives the shipping weight like a record's category.
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True,

@@ -66,6 +66,7 @@
             </td>
             <td style="padding:10px 0;border-bottom:1px solid #f3e6c9;vertical-align:middle;">
                 <div style="font-size:15px;font-weight:600;line-height:1.35;color:{% if version.left <= 0 %}#57718a{% else %}#0f3f67{% endif %};">{{ version.name }}</div>
+                {% if version.description or version.items_inside > 1 %}<div style="margin-top:2px;font-size:13px;line-height:1.4;color:#4f5b67;">{% if version.items_inside > 1 %}{{ version.items_inside }} piezas{% if version.description %} · {% endif %}{% endif %}{{ version.description }}</div>{% endif %}
                 <div style="margin-top:2px;font-size:13px;color:{% if version.left <= 0 %}#e85f3c{% else %}#57718a{% endif %};">{% if version.left <= 0 %}Agotado{% elif version.left == 1 %}Última copia{% else %}Quedan {{ version.left }}{% endif %}</div>
             </td>
             <td align="right" style="padding:10px 0 10px 12px;border-bottom:1px solid #f3e6c9;vertical-align:middle;white-space:nowrap;font-size:15px;font-weight:700;color:#0f3f67;">{{ version.price }}</td>

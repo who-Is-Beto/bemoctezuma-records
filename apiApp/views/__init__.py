@@ -136,8 +136,11 @@ from .presales_admin import (
     admin_presale_reopen,
     admin_presale_requote,
     admin_presale_ship,
+    admin_presale_shipments,
+    admin_presale_to_pickup,
     admin_presale_void_payment,
     admin_presales,
+    admin_presales_publish_many,
 )
 from .presales import (
     presale_checkout_complete,
