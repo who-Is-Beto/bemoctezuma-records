@@ -101,6 +101,7 @@ urlpatterns = [
     path('presales/admin/orders/<int:order_id>/payments/', views.admin_presale_add_payment, name='admin-presale-add-payment'),
     path('presales/admin/orders/<int:order_id>/deliver/', views.admin_presale_deliver, name='admin-presale-deliver'),
     path('presales/admin/orders/<int:order_id>/ship/', views.admin_presale_ship, name='admin-presale-ship'),
+    path('presales/admin/orders/<int:order_id>/received/', views.admin_presale_received, name='admin-presale-received'),
     path('presales/admin/orders/<int:order_id>/to-pickup/', views.admin_presale_to_pickup, name='admin-presale-to-pickup'),
     path('presales/admin/shipments/', views.admin_presale_shipments, name='admin-presale-shipments'),
     path('presales/admin/publish/', views.admin_presales_publish_many, name='admin-presales-publish-many'),

@@ -18,6 +18,8 @@ class OrderItemSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     order_items = OrderItemSerializer(many=True, read_only=True)
     pickup_bazar = serializers.SerializerMethodField()
+    # Code of the presale this order waits for, to ship in its box (null otherwise).
+    ships_with_code = serializers.CharField(source='ships_with.code', default=None, read_only=True)
 
     class Meta:
         model = Order
@@ -38,6 +40,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'order_items',
+            'ships_with_code',
         ]
 
     def get_pickup_bazar(self, obj):

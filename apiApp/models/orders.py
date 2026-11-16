@@ -30,6 +30,11 @@ class Order(models.Model):
     pickup_bazar = models.ForeignKey(
         'apiApp.Bazar', on_delete=models.SET_NULL, null=True, blank=True, related_name='orders'
     )
+    # Bought together with a presale and shipped in its box (one shipping fee):
+    # waits for the presale, then leaves with its guide.
+    ships_with = models.ForeignKey(
+        'apiApp.PreSaleOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='held_orders'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

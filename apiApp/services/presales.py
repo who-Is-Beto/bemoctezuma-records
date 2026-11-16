@@ -540,6 +540,13 @@ def deliver(order, *, by, item_ids=None):
 def mark_shipped(order, *, tracking, by):
     if order.delivery != 'shipping':
         raise PresaleError('not_shipping')
+    if order.status == 'enviado':
+        # Already on its way: only the tracking link changes (a typo, a new guide).
+        order.shipping_link = (tracking or '').strip()[:255]
+        order.save(update_fields=['shipping_link', 'updated_at'])
+        _log(order, 'status', f'guía · {order.shipping_link}', by)
+        _ship_held_orders(order)
+        return
     if not all_arrived(order):
         raise PresaleError('invalid_status', 'Se envía cuando llegan todas las versiones.')
     if order.status not in ('pagado',) or balance(order) > 0 or shipping_pending(order):
@@ -550,6 +557,25 @@ def mark_shipped(order, *, tracking, by):
     order.delivered_by = by
     order.save(update_fields=['status', 'shipping_link', 'delivered_at', 'delivered_by', 'updated_at'])
     _log(order, 'status', f'enviado · {order.shipping_link}', by)
+    _ship_held_orders(order)
+
+
+def _ship_held_orders(order):
+    """Store orders waiting to go in this presale's box leave with it, same guide."""
+    order.held_orders.exclude(status__in=('delivered', 'canceled')).update(
+        status='shipped', shipping_link=order.shipping_link, updated_at=timezone.now())
+
+
+def mark_received(order, *, by):
+    """A shipped order reached the buyer (Pedidos → Entregado)."""
+    if order.delivery != 'shipping':
+        raise PresaleError('not_shipping')
+    if order.status != 'enviado':
+        raise PresaleError('invalid_status', 'Primero márcala como enviada, con su guía.')
+    order.status = 'entregado'
+    order.save(update_fields=['status', 'updated_at'])
+    _log(order, 'status', 'enviado → entregado', by)
+    order.held_orders.filter(status='shipped').update(status='delivered', updated_at=timezone.now())
 
 
 def switch_to_pickup(order, *, by, shipping_refunded=False):
@@ -620,8 +646,16 @@ def reopen(order, *, by):
     hand_out(list(options.values()), by=by)
 
 
-def quote_shipping(lines, zip_code):
-    """Cheapest preferred-courier quote for ``lines`` [(option, qty)] in one box to ``zip_code``.
+def held_records(order):
+    """Store records waiting to ship in this presale's box: [(record, qty)]."""
+    return [(item.record, item.quantity)
+            for held in order.held_orders.exclude(status='canceled').prefetch_related('order_items__record')
+            for item in held.order_items.all() if item.record_id]
+
+
+def quote_shipping(lines, zip_code, records=()):
+    """Cheapest preferred-courier quote for ``lines`` [(option, qty)] (and store ``records``
+    [(record, qty)] going in the same box) to ``zip_code``.
 
     Returns {'cost', 'courier', 'service', 'title'}. Raises shipping.ShippingQuoteError
     on upstream failures and PresaleError('shipping_unavailable') when nothing fits.
@@ -629,7 +663,7 @@ def quote_shipping(lines, zip_code):
     zip_code = shipping.normalize_zip_code(zip_code)
     if not zip_code:
         raise PresaleError('invalid_zip', 'Escribe un código postal válido de 5 dígitos.')
-    quotes = shipping.get_shipping_quotes(zip_code, shipping.build_package_for_items(lines))
+    quotes = shipping.get_shipping_quotes(zip_code, shipping.build_package_for_items(lines, records))
     quote = shipping.select_cheapest_quote(quotes)
     if quote is None:
         raise PresaleError('shipping_unavailable', f'No hay opciones de envío para el código postal {zip_code}.')
@@ -683,7 +717,9 @@ def fulfil_presale_session(session):
         return None
     if PreSalePayment.objects.filter(stripe_checkout_session_id=session['id']).exists():
         return order
-    amount = Decimal(session.get('amount_total') or 0) / Decimal(100)
+    # A cart checkout carries store records too: only the presale's share is its payment.
+    amount = _money(metadata['presale_total']) if metadata.get('presale_total') else \
+        Decimal(session.get('amount_total') or 0) / Decimal(100)
     shipping_part = _money(metadata.get('shipping') or '0')
     with transaction.atomic():
         items = list(order.items.all())
@@ -721,7 +757,7 @@ def requote_shipping(order, *, by=None):
     if shipping_paid(order) > 0:
         # Shipping already charged (paid in full at reservation): that amount is final.
         return order
-    quote = quote_shipping(order_lines(order), (order.shipping_details or {}).get('zip'))
+    quote = quote_shipping(order_lines(order), (order.shipping_details or {}).get('zip'), held_records(order))
     order.shipping_cost = quote['cost']
     order.shipping_courier, order.shipping_service = quote['courier'], quote['service']
     order.save(update_fields=['shipping_cost', 'shipping_courier', 'shipping_service', 'updated_at'])
