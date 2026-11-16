@@ -90,10 +90,19 @@ def fulfill_checkout(session, cart_code=None):
     if not customer_email:
         customer_email = "unknown@checkout.local"
 
+    # A cart checkout may carry a presale too: its share is a presale payment, not this order.
+    presale_total = Decimal(metadata.get('presale_total') or '0')
+    together = metadata.get('ships_together') == '1'
+    ships_with = None
+    if together:
+        from ..models import PreSaleOrder
+        ships_with = PreSaleOrder.objects.filter(pk=metadata.get('order_id')).first()
+
     with transaction.atomic():
         order = Order.objects.create(
             stripe_checkout_session_id=session['id'],
-            amount=Decimal(session.get('amount_total') or 0) / Decimal(100),
+            amount=Decimal(session.get('amount_total') or 0) / Decimal(100) - presale_total,
+            ships_with=ships_with,
             currency=session['currency'],
             user_email=customer_email,
             shipped_to=shipped_to,
@@ -101,7 +110,8 @@ def fulfill_checkout(session, cart_code=None):
             shipping_cost=shipping_cost,
             shipping_courier=metadata.get('shipping_courier', ''),
             shipping_service=metadata.get('shipping_service', ''),
-            shipping_link="Preparando para envío" if shipped_to == "home" else "",
+            shipping_link=(f"Se envía junto con tu preventa {ships_with.code}" if ships_with
+                           else "Preparando para envío" if shipped_to == "home" else ""),
             pickup_bazar=pickup_bazar,
             status='paid',
         )

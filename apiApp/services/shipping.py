@@ -83,10 +83,12 @@ def option_unit_weight_grams(option):
     return unit * (getattr(option, 'items_inside', 1) or 1)
 
 
-def build_package_for_items(lines):
-    """Envíos Perros `package` for presale ``lines`` [(option, qty)] shipped in one box."""
-    units = sum(qty for _, qty in lines)
-    grams = PACKAGE_TARE_GRAMS + sum(option_unit_weight_grams(option) * qty for option, qty in lines)
+def build_package_for_items(lines, records=()):
+    """Envíos Perros `package` for presale ``lines`` [(option, qty)] shipped in one box,
+    plus store ``records`` [(record, qty)] bought with them to travel in the same box."""
+    units = sum(qty for _, qty in lines) + sum(qty * (record.items_inside or 1) for record, qty in records)
+    grams = PACKAGE_TARE_GRAMS + sum(option_unit_weight_grams(option) * qty for option, qty in lines) \
+        + sum(record_unit_weight_grams(record) * qty * (record.items_inside or 1) for record, qty in records)
     return {
         'type': 'Box',
         'depth': BOX_DEPTH_CM,

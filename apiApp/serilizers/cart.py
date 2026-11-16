@@ -8,9 +8,14 @@ from .catalog import RecordListSerializer
 class CartItemSerializer(serializers.ModelSerializer):
     record = RecordListSerializer(read_only=True)
     subtotal = serializers.SerializerMethodField()
+    # How many people have this record in favorites right now (social proof in the cart).
+    favorites_count = serializers.SerializerMethodField()
     class Meta:
         model = CartItem
-        fields = ['id', 'record', 'quantity', 'subtotal']
+        fields = ['id', 'record', 'quantity', 'subtotal', 'favorites_count']
+
+    def get_favorites_count(self, cart_item):
+        return cart_item.record.wishlist_records.count()
 
     def get_subtotal(self, cart_item):
         return cart_item.quantity * cart_item.record.effective_price

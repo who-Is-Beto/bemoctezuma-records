@@ -545,6 +545,7 @@ def _ship(request, order):
 
 admin_presale_deliver = _order_action(_deliver)
 admin_presale_ship = _order_action(_ship, perms=(ORDERS, CHANGE_ORDER))
+admin_presale_received = _order_action(lambda r, o: svc.mark_received(o, by=r.user), perms=(ORDERS, CHANGE_ORDER))
 admin_presale_to_pickup = _order_action(
     lambda r, o: svc.switch_to_pickup(o, by=r.user, shipping_refunded=r.data.get('shipping_refunded') is True))
 
@@ -552,11 +553,11 @@ admin_presale_to_pickup = _order_action(
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def admin_presale_shipments(request):
-    """Pedidos: presale orders going by mail once the records are paid (to ship, then shipped)."""
+    """Pedidos: presale orders going by mail once the records are paid, through every state after."""
     denied = _require_any(request, ORDERS_TAB, TAB)
     if denied:
         return denied
-    orders = _orders_qs().filter(delivery='shipping', paid_at__isnull=False, status__in=('pagado', 'enviado'))
+    orders = _orders_qs().filter(delivery='shipping', paid_at__isnull=False, status__in=('pagado', 'enviado', 'entregado', 'cancelado'))
     return Response([presale_admin_order_payload(o, request) for o in orders])
 admin_presale_cancel = _order_action(lambda r, o: svc.cancel(o, by=r.user, reason=r.data.get('reason')))
 admin_presale_expire = _order_action(lambda r, o: svc.expire(o, by=r.user))

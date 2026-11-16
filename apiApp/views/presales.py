@@ -18,7 +18,7 @@ from rest_framework.response import Response
 
 from .common import _require_email_verified, error_response
 from ..admin_panel import ACCESS
-from ..models import PreSale, PreSaleOption, PreSaleOrder, PreSaleSubscriber
+from ..models import Cart, PreSale, PreSaleOption, PreSaleOrder, PreSaleSubscriber
 from ..serilizers import PreSalePublicSerializer, presale_order_payload
 from ..services import presales as svc
 from ..services.emailing import send_presale_subscribe_confirmation
@@ -68,8 +68,13 @@ def presale_detail(request, slug):
 @api_view(['POST'])
 @throttle_classes([LiveScopedRateThrottle])
 def presale_shipping_estimate(request):
+    # With a cart code: the cart's records go in the same box (cart checkout, "todo junto").
+    cart = Cart.objects.filter(cart_code=str(request.data.get('cart_code') or '')).first() \
+        if request.data.get('cart_code') else None
+    records = [(item.record, item.quantity) for item in cart.cart_items.select_related('record', 'record__category')] \
+        if cart else ()
     try:
-        quote = svc.quote_shipping(svc.parse_items(request.data.get('items')), request.data.get('zip'))
+        quote = svc.quote_shipping(svc.parse_items(request.data.get('items')), request.data.get('zip'), records)
     except svc.PresaleError as exc:
         return presale_error(exc)
     except ShippingQuoteError as exc:

@@ -1,6 +1,7 @@
 """Checkout views: Stripe session creation, webhook, and order completion."""
 import json
 import logging
+import time
 from decimal import Decimal
 
 import stripe
@@ -14,6 +15,7 @@ from rest_framework.response import Response
 
 from .common import _require_email_verified, error_response
 from ..models import Bazar, Cart, Order
+from ..services import presales as presale_svc
 from ..services.presales import fulfil_presale_session
 from ..services import (
     PREFERRED_COURIER,
@@ -104,11 +106,28 @@ def create_stripe_checkout_session(request):
     if not cart or cart.cart_items.count() == 0:
         return error_response("Cart is empty or not found", status_code=400, code="cart_empty")
 
+    # Presales picked on their pages can be paid in this same checkout.
+    presale_req = request.data.get('presale') or None
+    presale_lines = None
+    if presale_req is not None:
+        if not isinstance(presale_req, dict):
+            return error_response("La preventa no es válida.", status_code=400, code="invalid_items")
+        try:
+            presale_lines = presale_svc.parse_items(presale_req.get('items'))
+        except presale_svc.PresaleError as exc:
+            return error_response(exc.message, status_code=400, code=exc.code)
+        if presale_req.get('accept_terms') is not True:
+            exc = presale_svc.PresaleError('terms_required')
+            return error_response(exc.message, status_code=400, code=exc.code)
+    # Home delivery with a presale: everything waits for the presale and goes in one
+    # box (one fee), or the records ship now and the presale later (two fees).
+    ship_together = bool(presale_lines) and shipped_to == "home" and presale_req.get('ship_together') is True
+
     # Home deliveries: re-quote server-side so the customer is charged the
     # real courier price — never an amount sent from the browser.
     shipping_line_item = None
     shipping_meta = {}
-    if shipped_to == "home":
+    if shipped_to == "home" and not ship_together:
         package = build_package_from_cart(cart)
         try:
             quotes = get_shipping_quotes(zip_code, package)
@@ -137,6 +156,7 @@ def create_stripe_checkout_session(request):
                 'quantity': 1,
             }
 
+    presale_order = None
     try:
         line_items = []
         for item in cart.cart_items.all():
@@ -163,7 +183,21 @@ def create_stripe_checkout_session(request):
         if shipping_line_item:
             line_items.append(shipping_line_item)
 
+        presale_meta = {}
+        if presale_lines:
+            try:
+                presale_order, presale_items, presale_meta = _presale_part(
+                    request.user, presale_lines, presale_req.get('amount'), shipped_to, shipping_details,
+                    cart if ship_together else None)
+            except presale_svc.PresaleError as exc:
+                return error_response(exc.message, status_code=409 if exc.code in ('sold_out', 'limit_exceeded') else 400,
+                                      code=exc.code)
+            except ShippingQuoteError as exc:
+                return error_response(exc.message, status_code=502, code=exc.code)
+            line_items.extend(presale_items)
+
         metadata = {'cart_code': cart_code, 'shipped_to': shipped_to}
+        metadata.update(presale_meta)
         if shipping_details:
             metadata['shipping_details'] = json.dumps(shipping_details)
         metadata.update(shipping_meta)
@@ -174,7 +208,12 @@ def create_stripe_checkout_session(request):
 
         success_url = f"{settings.FRONTEND_URL.rstrip('/')}/mis-ordenes?session_id={{CHECKOUT_SESSION_ID}}"
 
+        extra = {}
+        if presale_order is not None:
+            # The presale copies are held while the buyer pays; the session can't outlive the hold.
+            extra['expires_at'] = int(time.time()) + presale_svc.CHECKOUT_MINUTES * 60
         checkout_session = stripe.checkout.Session.create(
+            **extra,
             payment_method_types=['card'],
             line_items=line_items,
             mode='payment',
@@ -200,8 +239,49 @@ def create_stripe_checkout_session(request):
             status=200,
         )
     except Exception as e:
+        if presale_order is not None:
+            # Stripe down: release the presale hold right away.
+            presale_order.status = 'cancelado'
+            presale_order.save(update_fields=['status'])
         return error_response(str(e), status_code=500, code="checkout_error")
-    
+
+
+def _presale_part(user, lines, amount, shipped_to, shipping_details, together_cart):
+    """Reserve the presale lines of a cart checkout: (order, Stripe lines, metadata).
+
+    Pickup / bazar orders pick the presale up at the store. With ``together_cart``
+    the shipping quote is for the presale and the cart records in one box.
+    """
+    from .presales import _line, _record_lines
+    shipping = shipped_to == "home"
+    quote = None
+    if shipping:
+        records = [(item.record, item.quantity) for item in together_cart.cart_items.all()] if together_cart else ()
+        quote = presale_svc.quote_shipping(lines, shipping_details['zip'], records)
+    order = presale_svc.create_order(
+        lines, buyer=user, source='online', delivery='shipping' if shipping else 'pickup',
+        shipping_details=dict(shipping_details) if shipping else None, amount=amount,
+        shipping_quote=quote['cost'] if quote else None, accept_terms=True,
+    )
+    if quote:
+        order.shipping_courier, order.shipping_service = quote['courier'], quote['service']
+        order.save(update_fields=['shipping_courier', 'shipping_service'])
+    amount = presale_svc._money(amount)
+    full = amount >= order.item_price
+    item_amount = order.item_price if full else amount
+    shipping_now = order.shipping_cost or presale_svc.ZERO
+    items = _record_lines(order, item_amount, 'pago completo' if full else 'apartado')
+    if shipping_now > 0:
+        items.append(_line("Envío (todo junto en una caja)" if together_cart else "Envío de la preventa", shipping_now))
+    meta = {
+        'kind': 'combined', 'order_id': str(order.id), 'purpose': 'reserve',
+        'shipping': str(shipping_now.quantize(presale_svc.CENT)),
+        'presale_total': str((item_amount + shipping_now).quantize(presale_svc.CENT)),
+    }
+    if together_cart:
+        meta['ships_together'] = '1'
+    return order, items, meta
+
 
 @csrf_exempt
 def stripe_webhook(request):
@@ -264,9 +344,12 @@ def stripe_webhook(request):
 
     if event_type in ('checkout.session.completed', 'checkout.session.async_payment_succeeded'):
         session = event['data']['object']
-        if (session.get('metadata') or {}).get('kind') == 'presale':
+        kind = (session.get('metadata') or {}).get('kind')
+        if kind == 'presale':
             fulfil_presale_session(session)
             return HttpResponse(status=200)
+        if kind == 'combined':
+            fulfil_presale_session(session)  # idempotent; the records order follows below
         cart_code = _resolve_cart_code_from_session(session)
         session_id = session.get('id')
         print(f">>> checkout event | session_id={session_id} cart_code={cart_code}")
@@ -311,6 +394,8 @@ def complete_checkout_session(request):
 
     try:
         session = stripe.checkout.Session.retrieve(session_id)
+        if (session.get('metadata') or {}).get('kind') == 'combined':
+            fulfil_presale_session(session)
         cart_code = _resolve_cart_code_from_session(session)
         fulfill_checkout(session, cart_code)
         return Response({"message": "Order created successfully"}, status=200)
@@ -333,6 +418,8 @@ def checkout_success(request):
     try:
         session = stripe.checkout.Session.retrieve(session_id)
         if session.get("payment_status") == "paid":
+            if (session.get('metadata') or {}).get('kind') == 'combined':
+                fulfil_presale_session(session)
             cart_code = _resolve_cart_code_from_session(session)
             fulfill_checkout(session, cart_code)
             order = Order.objects.filter(stripe_checkout_session_id=session_id).first()
